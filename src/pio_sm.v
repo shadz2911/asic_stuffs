@@ -130,7 +130,8 @@ module pio_sm (
 
   // PULL instruction work
   wire is_pull = (instr_data[15:13] == 3'b100) && instr_data[7];
-  wire osr_empty = osr_shift_count >= 
+  wire osr_empty = osr_shift_count >= ((pull_thresh == 5'd0) ? 6'd32 : {1'b0, pull_thresh});
+  wire pull_skip = is_pull && instr_data[6] && !osr_empty;
   wire       stall      = is_pull && instr_data[5] && tx_empty && !pull_skip;
 
   // JMP taken assignment
@@ -184,6 +185,8 @@ module pio_sm (
       pin_oe_reg  <= 8'h00;
       x           <= 32'd0;
       y           <= 32'd0;
+      osr         <= 32'd0;
+      osr_shift_count <= 6'd32;
     end else if (clkdiv_tick) begin
       if (delay_cnt != 5'd0) begin
         // Still in the previous instruction's delay: just count down
@@ -219,6 +222,17 @@ module pio_sm (
             if (instr_data[15:13] == 3'b000) begin
               if (instr_data[7:5] == 3'b010) x <= x -1;
               if (instr_data[7:5] == 3'b100) y <= y -1;
+            end
+
+            // PULL INSTRUCTION DECODING
+            if (is_pull && ~pull_skip) begin
+              if (!tx_empty) begin
+                osr <= tx_dout;
+                osr_shift_count <= 0;
+              end else begin
+                osr <= x;
+                osr_shift_count <= 0;
+              end
             end
         end
         // SIDESET assignment happens after SET assignment
@@ -259,7 +273,7 @@ module pio_sm (
 
   // Stub tie-offs: drive every output so the design compiles and lints cleanly.
   assign instr_addr = pc;       // fetch address is the pc (combinational instruction memory read)
-  assign tx_pop     = clkdiv_tick && (ddelay_cnt == 0) && !tx_empty && !pull_skip;
+  assign tx_pop     = is_pull && clkdiv_tick && (delay_cnt == 0) && !tx_empty && !pull_skip;
   assign rx_push    = 1'b0;
   assign rx_din     = 32'd0;
   assign pins_out   = pin_out_reg;
