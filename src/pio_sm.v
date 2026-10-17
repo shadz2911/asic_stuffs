@@ -97,15 +97,15 @@ module pio_sm (
   reg [7:0]  pin_oe_reg;  // pin directions    (side-set pindirs, SET PINDIRS; OUT later)
   reg [31:0] x;           // scratch X (SET now; MOV, JMP X-- later - see 3.4.10, 3.4.8, 3.4.2)
   reg [31:0] y;           // scratch Y
+  reg [31:0] osr;              // output shift register (PULL loads, OUT shifts - see 3.4.7, 3.4.5)
+  reg [5:0]  osr_shift_count;  // bits shifted out of osr, 0..32 (32 = empty)
 
   // ------------------------------------------------------------------
   // Architectural state: declared only, NOT yet driven. Each needs a reset
   // value and an update rule in a clkdiv_tick-gated always block.
   // ------------------------------------------------------------------
   /* verilator lint_off UNDRIVEN */
-  reg [31:0] osr;              // TODO: output shift register (see 3.4.5 OUT, 3.4.7 PULL)
   reg [31:0] isr;              // TODO: input shift register (see 3.4.4 IN, 3.4.6 PUSH)
-  reg [5:0]  osr_shift_count;  // TODO: bits shifted out of osr, 0..32 (autopull compares to pull_thresh)
   reg [5:0]  isr_shift_count;  // TODO: bits shifted into isr, 0..32 (autopush compares to push_thresh)
   /* verilator lint_on UNDRIVEN */
 
@@ -155,14 +155,23 @@ module pio_sm (
         3'b101: jmp_taken = x != y;
         // jmp_pin is 0..31 but only 8 pins exist: pins 8+ read as 0
         3'b110: jmp_taken = (jmp_pin < 5'd8) ? pins_in[jmp_pin[2:0]] : 1'b0;
-        3'b111: jmp_taken = 1'b0; // TODO
+        3'b111: jmp_taken = !osr_empty;  // !OSRE
       endcase
     end
   end
+  
+  // OUT istruction handling
+
+  // bit count 0 means 32
+  wire [31:0] osr_data =
+      (instr_data[4:0] == 5'd0) ? osr :
+      out_shift_right ? (osr & ~(32'hFFFFFFFF << instr_data[4:0]))
+                      : (osr >> (6'd32 - {1'b0, instr_data[4:0]}));
 
   // Where pc goes when the current instruction completes. A taken JMP overrides
   // wrap, so a JMP placed at wrap_top still jumps (see 3.5.2).
   wire [4:0] next_pc = jmp_taken          ? jmp_target  :
+                       (instr_data[15:13] == 3'b011) && (instr_data[7:5] == 3'b101) ? osr_data[4:0] :
                        (pc == wrap_top)   ? wrap_bottom :
                                             pc + 5'd1;
 
@@ -176,6 +185,10 @@ module pio_sm (
   // SET pin numbers, widened the same way (value bit 0 is instr_data[0])
   wire [31:0] set_base32  = {27'd0, set_base};                         // first SET pin
   wire [31:0] set_count32 = {29'd0, set_count};                        // pins written (max 5)
+
+  // OUT pin numbers, widened the same way
+  wire [31:0] out_base32  = {27'd0, out_base};                         // first OUT pin
+  wire [31:0] out_count32 = {26'd0, out_count};                        // pins written (0..32)
 
   always @(posedge clk) begin
     if (!rst_n) begin
@@ -234,6 +247,32 @@ module pio_sm (
                 osr_shift_count <= 0;
               end
             end
+
+            // OUT instruction decoding
+
+            if (instr_data[15:13] == 3'b011) begin
+              osr_shift_count <= (instr_data[4:0] == 5'd0) ||
+                                 (osr_shift_count + {1'b0, instr_data[4:0]} > 6'd32) ? 6'd32 :
+                                 osr_shift_count + {1'b0, instr_data[4:0]};
+              osr <= instr_data[4:0] == 5'd0 ? 32'd0 :
+                out_shift_right ? (osr >> instr_data[4:0])
+                : (osr << instr_data[4:0]);
+              case (instr_data[7:5])
+                3'b000:
+                  for (p = 0; p < 8; p = p + 1)
+                    if (p >= out_base32 && p - out_base32 < out_count32)
+                      pin_out_reg[p] <= osr_data[p - out_base32];
+                3'b001: x <= osr_data;
+                3'b010: y <= osr_data;
+                3'b100:
+                  for (p = 0; p < 8; p = p + 1)
+                    if (p >= out_base32 && p - out_base32 < out_count32)
+                      pin_oe_reg[p] <= osr_data[p - out_base32];
+                3'b110: ; // TODO (not needed for UART)
+                3'b111: ; // TODO (not needed for UART)
+                default: ;
+              endcase
+            end
         end
         // SIDESET assignment happens after SET assignment
         // Side-set: applied on issue, stalled or not. Copy the value bits straight
@@ -280,12 +319,12 @@ module pio_sm (
   assign pins_oe    = pin_oe_reg;
 
   // Unused inputs (remove entries as the real logic uses them)
-  wire _unused = &{tx_dout, tx_empty, rx_full,
-                   osr, isr, osr_shift_count, isr_shift_count,
+  wire _unused = &{rx_full,
+                   isr, isr_shift_count,
                    // config fields not used yet (clkdiv_frac stays: fraction unsupported)
                    clkdiv_frac,
-                   pull_thresh, push_thresh, out_shift_right, in_shift_right, autopull, autopush,
-                   out_count, in_base, out_base,
+                   push_thresh, in_shift_right, autopull, autopush,
+                   in_base,
                    // reserved / unsupported register bits
                    clkdiv[7:0], execctrl[31], execctrl[23:17], execctrl[6:0], shiftctrl[31:30],
                    shiftctrl[15:0], 1'b0};
