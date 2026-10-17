@@ -1,2 +1,4 @@
 pytest==8.4.2
 cocotb==2.0.1
+# Fallback PIO assembler for scripts/assemble.py when the official pioasm is not on PATH
+adafruit-circuitpython-pioasm==1.3.8
