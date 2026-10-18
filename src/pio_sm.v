@@ -148,8 +148,17 @@ module pio_sm (
   wire is_pull = (instr_data[15:13] == 3'b100) && instr_data[7];
   wire osr_empty = osr_shift_count >= ((pull_thresh == 5'd0) ? 6'd32 : {1'b0, pull_thresh});
   wire pull_skip = is_pull && instr_data[6] && !osr_empty;
+
+  // PUSH instruction work
+  wire is_push = (instr_data[15:13] == 3'b100) && !instr_data[7];
+  wire isr_empty = isr_shift_count >= ((push_thresh == 5'd0) ? 6'd32 : {1'b0, push_thresh});
+  wire push_skip = is_push && instr_data[6] && !isr_empty;
+
+  // Stall handling
   wire stall = (is_pull && instr_data[5] && tx_empty && !pull_skip)
-    || ((instr_data[15:13] == 3'b001) && to_wait);
+    || (is_push && instr_data[5] && rx_full && !push_skip)
+    || ((instr_data[15:13] == 3'b001) && to_wait)
+    || (to_auto && (instr_data[15:13] == 3'b010) && rx_full);
 
   // JMP taken assignment
   
@@ -186,8 +195,10 @@ module pio_sm (
                       : (osr >> (6'd32 - {1'b0, instr_data[4:0]}));
 
   // IN instruction handling
+
   reg [31:0] isr_data, in_src, in_data;
   reg [4:0]  in_pin;   // pin feeding bit b of the PINS source; wraps at 32
+  reg [5:0] isr_shift_count_data;
   integer    b;
   always @(*) begin
     in_src = 32'd0;
@@ -212,7 +223,16 @@ module pio_sm (
     isr_data = (instr_data[4:0] == 5'd0) ? in_data :
       in_shift_right ? (isr >> instr_data[4:0]) | (in_data << (32-instr_data[4:0]))
       : (isr << instr_data[4:0]) | (in_data);
+    isr_shift_count_data = (instr_data[4:0] == 5'd0) ||
+                                 (isr_shift_count + {1'b0, instr_data[4:0]} > 6'd32) ? 6'd32 :
+                                 isr_shift_count + {1'b0, instr_data[4:0]};
   end
+
+  wire to_auto = (isr_shift_count_data >= ((push_thresh == 5'd0) ? 6'd32 : {1'b0, push_thresh})) && autopush;
+  assign rx_push = clkdiv_tick && (delay_cnt == 0) && !rx_full &&
+                   ((to_auto && (instr_data[15:13] == 3'b010)) || (is_push && !push_skip));
+  // PUSH sends the current ISR; autopush sends the ISR after this IN's shift
+  assign rx_din = is_push ? isr : isr_data;
 
   // Where pc goes when the current instruction completes. A taken JMP overrides
   // wrap, so a JMP placed at wrap_top still jumps (see 3.5.2).
@@ -287,13 +307,19 @@ module pio_sm (
 
             // PULL INSTRUCTION DECODING
             if (is_pull && ~pull_skip) begin
+              osr_shift_count <= 0;
               if (!tx_empty) begin
                 osr <= tx_dout;
-                osr_shift_count <= 0;
               end else begin
                 osr <= x;
-                osr_shift_count <= 0;
               end
+            end
+
+            // PUSH INSTRUCTION DECODING
+            // cleared even on a noblock push to a full FIFO (that word is dropped)
+            if (is_push && ~push_skip) begin
+              isr <= 32'd0;
+              isr_shift_count <= 0;
             end
 
             // OUT INSTRUCTION DECODING
@@ -324,9 +350,11 @@ module pio_sm (
             // IN INSTRUCTION DECODING
             if (instr_data[15:13] == 3'b010) begin
               isr <= isr_data;
-              isr_shift_count <= (instr_data[4:0] == 5'd0) ||
-                                 (isr_shift_count + {1'b0, instr_data[4:0]} > 6'd32) ? 6'd32 :
-                                 isr_shift_count + {1'b0, instr_data[4:0]};
+              isr_shift_count <= isr_shift_count_data;
+              if (to_auto) begin
+                isr <= 0;
+                isr_shift_count <= 0;
+              end
             end
         end
         // SIDESET assignment happens after SET assignment
@@ -350,11 +378,8 @@ module pio_sm (
     end
   end
 
-  // Stub tie-offs: drive every output so the design compiles and lints cleanly.
   assign instr_addr = pc;       // fetch address is the pc (combinational instruction memory read)
   assign tx_pop     = is_pull && clkdiv_tick && (delay_cnt == 0) && !tx_empty && !pull_skip;
-  assign rx_push    = 1'b0;
-  assign rx_din     = 32'd0;
   assign pins_out   = pin_out_reg;
   assign pins_oe    = pin_oe_reg;
 
