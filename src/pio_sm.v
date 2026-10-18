@@ -185,6 +185,35 @@ module pio_sm (
       out_shift_right ? (osr & ~(32'hFFFFFFFF << instr_data[4:0]))
                       : (osr >> (6'd32 - {1'b0, instr_data[4:0]}));
 
+  // IN instruction handling
+  reg [31:0] isr_data, in_src, in_data;
+  reg [4:0]  in_pin;   // pin feeding bit b of the PINS source; wraps at 32
+  integer    b;
+  always @(*) begin
+    in_src = 32'd0;
+    in_pin = 5'd0;
+    case (instr_data[7:5])
+      // bit b = pin in_base + b; pins 8+ read 0
+      3'b000:
+        for (b = 0; b < 32; b = b + 1) begin
+          in_pin    = in_base + b[4:0];
+          in_src[b] = (in_pin[4:3] == 2'b00) ? pins_in[in_pin[2:0]] : 1'b0;
+        end
+      3'b001: in_src = x;
+      3'b010: in_src = y;
+      3'b011: in_src = 32'd0;
+      3'b100: ;
+      3'b101: ;
+      3'b110: in_src = isr;
+      3'b111: in_src = osr;
+    endcase
+    // bit count 0 means 32: the whole source replaces the ISR
+    in_data = (instr_data[4:0] == 5'd0) ? in_src : in_src & ~(32'hFFFFFFFF << instr_data[4:0]);
+    isr_data = (instr_data[4:0] == 5'd0) ? in_data :
+      in_shift_right ? (isr >> instr_data[4:0]) | (in_data << (32-instr_data[4:0]))
+      : (isr << instr_data[4:0]) | (in_data);
+  end
+
   // Where pc goes when the current instruction completes. A taken JMP overrides
   // wrap, so a JMP placed at wrap_top still jumps (see 3.5.2).
   wire [4:0] next_pc = jmp_taken          ? jmp_target  :
@@ -217,6 +246,8 @@ module pio_sm (
       y           <= 32'd0;
       osr         <= 32'd0;
       osr_shift_count <= 6'd32;
+      isr <= 32'd0;
+      isr_shift_count <= 6'd0;
     end else if (clkdiv_tick) begin
       if (delay_cnt != 5'd0) begin
         // Still in the previous instruction's delay: just count down
@@ -265,8 +296,7 @@ module pio_sm (
               end
             end
 
-            // OUT instruction decoding
-
+            // OUT INSTRUCTION DECODING
             if (instr_data[15:13] == 3'b011) begin
               osr_shift_count <= (instr_data[4:0] == 5'd0) ||
                                  (osr_shift_count + {1'b0, instr_data[4:0]} > 6'd32) ? 6'd32 :
@@ -290,6 +320,14 @@ module pio_sm (
                 default: ;
               endcase
             end
+
+            // IN INSTRUCTION DECODING
+            if (instr_data[15:13] == 3'b010) begin
+              isr <= isr_data;
+              isr_shift_count <= (instr_data[4:0] == 5'd0) ||
+                                 (isr_shift_count + {1'b0, instr_data[4:0]} > 6'd32) ? 6'd32 :
+                                 isr_shift_count + {1'b0, instr_data[4:0]};
+            end
         end
         // SIDESET assignment happens after SET assignment
         // Side-set: applied on issue, stalled or not. Copy the value bits straight
@@ -312,21 +350,6 @@ module pio_sm (
     end
   end
 
-  // JUMP INSTRUCTION DECODING
-
-  
-
-  // TODO: decode instr_data[15:13]: JMP, WAIT, IN, OUT, PUSH/PULL, MOV, IRQ, SET (see 3.4.1).
-  //       Bits [12:8] split between side-set (top sideset_count bits) and delay (see 3.5.1).
-  // TODO: UART needs: JMP X-- (3.4.2), WAIT PIN (3.4.3), IN PINS (3.4.4), OUT PINS (3.4.5),
-  //       PULL block (3.4.7), SET X (3.4.10), side-set with opt (3.5.1), autopush (3.5.4).
-  // TODO: stalls: WAIT condition false, PULL on tx_empty, autopush with rx_full.
-  // TODO: FIFO handshakes: tx_pop on PULL, rx_push on PUSH / autopush.
-  // TODO: pins: apply OUT/SET/side-set ranges (*_base / *_count) to pins_out/pins_oe;
-  //       read pins_in via in_base (IN, WAIT PIN) and jmp_pin.
-  // NOTE: config fields are runtime signals now - use them in expressions only,
-  //       never as widths, part-select bounds or generate conditions.
-
   // Stub tie-offs: drive every output so the design compiles and lints cleanly.
   assign instr_addr = pc;       // fetch address is the pc (combinational instruction memory read)
   assign tx_pop     = is_pull && clkdiv_tick && (delay_cnt == 0) && !tx_empty && !pull_skip;
@@ -338,8 +361,6 @@ module pio_sm (
   // Unused inputs (remove entries as the real logic uses them)
   wire _unused = &{rx_full,
                    isr, isr_shift_count,
-                   // config fields not used yet (clkdiv_frac stays: fraction unsupported)
-                   clkdiv_frac,
                    push_thresh, in_shift_right, autopull, autopush,
                    // reserved / unsupported register bits
                    clkdiv[7:0], execctrl[31], execctrl[23:17], execctrl[6:0], shiftctrl[31:30],
