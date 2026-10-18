@@ -128,11 +128,28 @@ module pio_sm (
   // (see 3.5.1). A shift by a runtime value is fine - it is just a small mux.
   wire [4:0] delay_field = instr_data[12:8] & (5'b11111 >> sideset_count);
 
+  // WAIT instruction handling
+
+  reg to_wait;
+  reg [4:0] wait_sum;  // 5 bits: wraps at 32 like the RP2040
+  always @(*) begin
+    to_wait = 1'b0;
+    wait_sum = in_base + instr_data[4:0];
+    case (instr_data[6:5])
+      // pins 8+ don't exist and read as 0
+      2'b00: to_wait = ((instr_data[4:3] != 2'b00) ? 1'b0 : pins_in[instr_data[2:0]]) != instr_data[7];
+      2'b01: to_wait = ((wait_sum[4:3] != 2'b00)   ? 1'b0 : pins_in[wait_sum[2:0]])   != instr_data[7];
+      2'b10: ; // TODO when IRQ implemented, will currently just complete
+      default: ;
+    endcase
+  end
+
   // PULL instruction work
   wire is_pull = (instr_data[15:13] == 3'b100) && instr_data[7];
   wire osr_empty = osr_shift_count >= ((pull_thresh == 5'd0) ? 6'd32 : {1'b0, pull_thresh});
   wire pull_skip = is_pull && instr_data[6] && !osr_empty;
-  wire       stall      = is_pull && instr_data[5] && tx_empty && !pull_skip;
+  wire stall = (is_pull && instr_data[5] && tx_empty && !pull_skip)
+    || ((instr_data[15:13] == 3'b001) && to_wait);
 
   // JMP taken assignment
   
@@ -324,7 +341,6 @@ module pio_sm (
                    // config fields not used yet (clkdiv_frac stays: fraction unsupported)
                    clkdiv_frac,
                    push_thresh, in_shift_right, autopull, autopush,
-                   in_base,
                    // reserved / unsupported register bits
                    clkdiv[7:0], execctrl[31], execctrl[23:17], execctrl[6:0], shiftctrl[31:30],
                    shiftctrl[15:0], 1'b0};
