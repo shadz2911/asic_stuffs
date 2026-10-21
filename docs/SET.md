@@ -1,0 +1,4 @@
+- Set is extremely similar to sideset except that it is an instruction on its own instead
+- same set_base and set_count for the pindirs and pinouts
+- however the instr_data[7:5] chooses between writing X, Y, pinouts or pindirs
+- 

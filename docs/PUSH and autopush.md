@@ -1,0 +1,1 @@
+Autpush happens when isr_shift_count for the next cycle is greater than the pull threshold
