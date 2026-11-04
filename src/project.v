@@ -42,6 +42,19 @@ module tt_um_example #(
   wire [7:0] pins_in = {7'b0000000, uart_rx_sync};  // pin 0 = UART RX; pins 7..1 not bonded out
   wire [7:0] sm0_pins_out, sm0_pins_oe, sm1_pins_out, sm1_pins_oe;
 
+  // ---- Host interface: host_spi -> host_regs ----
+  wire        host_req, host_wr;
+  wire [6:0]  host_addr;
+  wire [31:0] host_data, host_rdata;
+
+  // ---- Host interface: host_regs -> rest of the chip ----
+  wire        mem_we;
+  wire [4:0]  mem_waddr;
+  wire [15:0] mem_wdata;
+  wire        host_sm0_tx_push;
+  wire [31:0] host_sm0_tx_din;
+  wire [1:0]  sm_enable;
+
   // UART RX is asynchronous to clk: synchronise before any logic sees it
   sync2 #(.WIDTH(1)) u_sync_rx (
       .clk  (clk),
@@ -50,13 +63,41 @@ module tt_um_example #(
       .q    (uart_rx_sync)
   );
 
+  host_spi u_host_spi (
+      .sck  (ui_in[7]),
+      .cs_n (ui_in[6]),
+      .mosi (ui_in[5]),
+      .clk  (clk),
+      .rst_n(rst_n),
+      .req  (host_req),
+      .wr   (host_wr),
+      .addr (host_addr),
+      .data (host_data)
+  );
+
+  host_regs u_host_regs (
+      .clk        (clk),
+      .rst_n      (rst_n),
+      .req        (host_req),
+      .we         (host_wr),
+      .addr       (host_addr),
+      .wdata      (host_data),
+      .rdata      (host_rdata),
+      .mem_we     (mem_we),
+      .mem_waddr  (mem_waddr),
+      .mem_wdata  (mem_wdata),
+      .sm0_tx_push(host_sm0_tx_push),
+      .sm0_tx_din (host_sm0_tx_din),
+      .sm_enable  (sm_enable)
+  );
+
   instr_mem #(
       .INIT_FILE(PROGRAM_HEX)
   ) u_instr_mem (
       .clk   (clk),
-      .we    (1'b0),          // TODO: program loader (not decided)
-      .waddr (5'd0),
-      .wdata (16'd0),
+      .we    (mem_we),          // TODO: program loader (not decided)
+      .waddr (mem_waddr),
+      .wdata (mem_wdata),
       .raddr0(sm0_instr_addr),
       .rdata0(sm0_instr_data),
       .raddr1(sm1_instr_addr),
@@ -66,8 +107,8 @@ module tt_um_example #(
   // ---------------- SM0: UART TX ----------------
   fifo #(.WIDTH(32), .DEPTH(4)) u_sm0_tx_fifo (
       .clk(clk), .rst_n(rst_n),
-      .push (1'b0),           // TODO: system side - bytes to transmit (not decided)
-      .din  (32'd0),
+      .push (host_sm0_tx_push),           // TODO: system side - bytes to transmit (not decided)
+      .din  (host_sm0_tx_din),
       .pop  (sm0_tx_pop),
       .dout (sm0_tx_dout),
       .empty(sm0_tx_empty),
@@ -107,7 +148,7 @@ module tt_um_example #(
   pio_sm u_sm0 (
       .clk       (clk),
       .rst_n     (rst_n),
-      .enable    (1'b1),        // TODO: host-controlled enable (not decided)
+      .enable    (sm_enable[0]),        // TODO: host-controlled enable (not decided)
       .clkdiv    (SM0_CLKDIV),
       .execctrl  (SM0_EXECCTRL),
       .shiftctrl (SM0_SHIFTCTRL),
@@ -164,7 +205,7 @@ module tt_um_example #(
   pio_sm u_sm1 (
       .clk       (clk),
       .rst_n     (rst_n),
-      .enable    (1'b1),        // TODO: host-controlled enable (not decided)
+      .enable    (sm_enable[1]),        // TODO: host-controlled enable (not decided)
       .clkdiv    (SM1_CLKDIV),
       .execctrl  (SM1_EXECCTRL),
       .shiftctrl (SM1_SHIFTCTRL),
@@ -189,7 +230,8 @@ module tt_um_example #(
   assign uio_oe  = 8'd0;
 
   // List all unused inputs to prevent warnings
-  wire _unused = &{ena, ui_in[7:1], uio_in,
+  wire _unused = &{ena, ui_in[4:1], uio_in, host_rdata,
+                   mem_we, mem_waddr, mem_wdata, host_sm0_tx_push, host_sm0_tx_din, sm_enable,  // until step 3
                    sm0_tx_full, sm0_tx_level, sm0_rx_empty, sm0_rx_dout, sm0_rx_level,
                    sm1_tx_full, sm1_tx_level, sm1_rx_empty, sm1_rx_dout, sm1_rx_level,
                    sm0_pins_out[7:1], sm0_pins_oe, sm1_pins_out, sm1_pins_oe, 1'b0};

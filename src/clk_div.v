@@ -26,10 +26,10 @@ module clk_div (
 
   always @(posedge clk) begin
     if (!rst_n) begin
-        counter <= 0;
+      counter <= 0;
     end else if (enable) begin
-        // Only count (and wrap) while enabled; otherwise hold
-        counter <= (counter == TOP) ? 16'd0 : counter + 16'd1;
+      // Only count (and wrap) while enabled; otherwise hold
+      counter <= (counter == TOP) ? 16'd0 : counter + 16'd1;
     end
   end
 
