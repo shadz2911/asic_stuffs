@@ -28,7 +28,7 @@ make -B GATES=yes                                    # gate-level; needs PDK_ROO
 Lint and strict compile, from the repo root:
 
 ```sh
-verilator --lint-only -Wall -DSIM --top-module tt_um_example src/*.v
+verilator --lint-only -Wall -DSIM --top-module tt_um_shadz2911_pio src/*.v
 iverilog -g2005 -Wall -DSIM -o /dev/null src/*.v
 ```
 
@@ -46,7 +46,7 @@ GDS hardening runs in the `gds` GitHub Action (`TinyTapeout/tt-gds-action@ihp-cm
 
 ## Architecture
 
-`src/project.v` (`tt_um_example`) is structural only: it has Tiny Tapeout's fixed port list and wires the blocks together. It contains two `pio_sm` instances, one TX and one RX `fifo` per SM, one `instr_mem` with a read port per SM, and the host interface (`host_spi` + `host_regs`). Current pins: `ui_in[7:5]` = SPI SCK, CS_n, MOSI; `uo_out[7]` = MISO; `ui_in[0]` feeds PIO pin 0 (UART RX); `uo_out[0]` is SM0's pin 0 (UART TX).
+`src/project.v` (`tt_um_shadz2911_pio`) is structural only: it has Tiny Tapeout's fixed port list and wires the blocks together. It contains two `pio_sm` instances, one TX and one RX `fifo` per SM, one `instr_mem` with a read port per SM, and the host interface (`host_spi` + `host_regs`). Current pins: `ui_in[7:5]` = SPI SCK, CS_n, MOSI; `uo_out[7]` = MISO; `ui_in[0]` feeds PIO pin 0 (UART RX); `uo_out[0]` is SM0's pin 0 (UART TX).
 
 ### Program flow across files
 
@@ -82,7 +82,6 @@ The header comment states the execution rule. An instruction is issued on a `clk
 
 ## Known gaps before submission
 
-- `info.yaml` still has template `project` metadata and the template module name `tt_um_example`, which must become unique.
 - PIO pins aren't on `uio` yet and `pins_oe` is unused, so bidirectional protocols such as I2C can't run, and pins are always driven.
 - `test/test_uart_tx.py` and `test/test_uart_rx.py` cover UART through the pins. SM1 has no TX test and SM0 has no RX test, and gate-level simulation hasn't been run.
 

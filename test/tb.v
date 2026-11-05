@@ -26,12 +26,11 @@ module tb ();
   // Instruction memory image, set from the Makefile (-Ptb.PROGRAM_HEX=...)
   parameter PROGRAM_HEX = "";
 
-  // Replace tt_um_example with your module name:
 `ifdef GL_TEST
   // The gate-level netlist has no parameters
-  tt_um_example user_project (
+  tt_um_shadz2911_pio user_project (
 `else
-  tt_um_example #(.PROGRAM_HEX(PROGRAM_HEX)) user_project (
+  tt_um_shadz2911_pio #(.PROGRAM_HEX(PROGRAM_HEX)) user_project (
 `endif
       .ui_in  (ui_in),    // Dedicated inputs
       .uo_out (uo_out),   // Dedicated outputs

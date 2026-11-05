@@ -10,7 +10,9 @@
 // ports so each state machine can fetch the instruction at its own pc every cycle.
 module instr_mem #(
     // Hex image loaded in simulation only (scripts/assemble.py output). "" = zeroed.
+    /* verilator lint_off UNUSEDPARAM */
     parameter INIT_FILE = ""
+    /* verilator lint_on UNUSEDPARAM */
 ) (
     input  wire        clk,
 
