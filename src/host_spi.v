@@ -20,7 +20,7 @@ module host_spi (
 
 wire sck_sync, cs_n_sync, mosi_sync;
 
-sync2 sck_job (.clk(clk), .rst_n(rst_n), .d(sck), .q(sck_sync));
+sync2 #(.RESET_VAL(1'b0)) sck_job (.clk(clk), .rst_n(rst_n), .d(sck), .q(sck_sync));
 sync2 cs_n_job (.clk(clk), .rst_n(rst_n), .d(cs_n), .q(cs_n_sync));
 sync2 mosi_job (.clk(clk), .rst_n(rst_n), .d(mosi), .q(mosi_sync));
 

@@ -394,6 +394,7 @@ module pio_sm (
   // Unused inputs (remove entries as the real logic uses them)
   wire _unused = &{rx_full,
                    isr, isr_shift_count,
+                   clkdiv_frac,
                    push_thresh, in_shift_right, autopull, autopush,
                    // reserved / unsupported register bits
                    clkdiv[7:0], execctrl[31], execctrl[23:17], execctrl[6:0], shiftctrl[31:30],

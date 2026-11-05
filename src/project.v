@@ -5,7 +5,7 @@
 
 `default_nettype none
 
-module tt_um_example #(
+module tt_um_shadz2911_pio #(
     // Simulation-only instruction memory image (scripts/assemble.py output), set by the testbench
     parameter PROGRAM_HEX = ""
 ) (
