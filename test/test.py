@@ -23,5 +23,5 @@ async def test_project(dut):
     await ClockCycles(dut.clk, 10)
     dut.rst_n.value = 1
 
-    # All outputs are 0 after reset (stubs tie them off)
-    assert dut.uo_out.value == 0
+    # After reset only the TX line (uo_out[0]) is high, at its idle level
+    assert dut.uo_out.value == 1

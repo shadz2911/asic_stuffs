@@ -36,6 +36,9 @@ module pio_sm (
     // Not an RP2040 register: there the SDK forces a JMP to the program's offset
     // through SMx_INSTR. Here pc simply resets to this value.
     input  wire [4:0]  start_pc,
+    // Pin levels while disabled, so a line idles correctly before the SM runs.
+    // The RP2040 SDK does this with pio_sm_set_pins() before enabling.
+    input  wire [7:0]  pins_init,
 
     // Instruction fetch
     output wire [4:0]  instr_addr,   // = pc
@@ -260,7 +263,7 @@ module pio_sm (
     if (!rst_n) begin
       pc          <= start_pc;
       delay_cnt   <= 5'd0;
-      pin_out_reg <= 8'h00;
+      pin_out_reg <= pins_init;
       pin_oe_reg  <= 8'h00;
       x           <= 32'd0;
       y           <= 32'd0;
@@ -268,6 +271,11 @@ module pio_sm (
       osr_shift_count <= 6'd32;
       isr <= 32'd0;
       isr_shift_count <= 6'd0;
+    end else if (!enable) begin
+      // start_pc is written after reset, so a disabled SM waits at it
+      pc          <= start_pc;
+      delay_cnt   <= 5'd0;
+      pin_out_reg <= pins_init;
     end else if (clkdiv_tick) begin
       if (delay_cnt != 5'd0) begin
         // Still in the previous instruction's delay: just count down

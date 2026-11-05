@@ -46,6 +46,7 @@ module tt_um_example #(
   wire        host_req, host_wr;
   wire [6:0]  host_addr;
   wire [31:0] host_data, host_rdata;
+  wire        host_miso;
 
   // ---- Host interface: host_regs -> rest of the chip ----
   wire        mem_we;
@@ -53,7 +54,14 @@ module tt_um_example #(
   wire [15:0] mem_wdata;
   wire        host_sm0_tx_push;
   wire [31:0] host_sm0_tx_din;
+  wire        host_sm1_tx_push;
+  wire [31:0] host_sm1_tx_din;
+  wire        host_sm0_rx_pop, host_sm1_rx_pop;
   wire [1:0]  sm_enable;
+  wire [31:0] sm0_clkdiv, sm0_execctrl, sm0_shiftctrl, sm0_pinctrl;
+  wire [31:0] sm1_clkdiv, sm1_execctrl, sm1_shiftctrl, sm1_pinctrl;
+  wire [4:0]  sm0_start_pc, sm1_start_pc;
+  wire [7:0]  sm0_pins_init, sm1_pins_init;
 
   // UART RX is asynchronous to clk: synchronise before any logic sees it
   sync2 #(.WIDTH(1)) u_sync_rx (
@@ -72,7 +80,9 @@ module tt_um_example #(
       .req  (host_req),
       .wr   (host_wr),
       .addr (host_addr),
-      .data (host_data)
+      .data (host_data),
+      .rdata(host_rdata),
+      .miso (host_miso)
   );
 
   host_regs u_host_regs (
@@ -88,7 +98,33 @@ module tt_um_example #(
       .mem_wdata  (mem_wdata),
       .sm0_tx_push(host_sm0_tx_push),
       .sm0_tx_din (host_sm0_tx_din),
-      .sm_enable  (sm_enable)
+      .sm1_tx_push(host_sm1_tx_push),
+      .sm1_tx_din (host_sm1_tx_din),
+      .sm0_rx_dout (sm0_rx_dout),
+      .sm0_rx_empty(sm0_rx_empty),
+      .sm0_rx_full (sm0_rx_full),
+      .sm0_tx_empty(sm0_tx_empty),
+      .sm0_tx_full (sm0_tx_full),
+      .sm0_rx_pop  (host_sm0_rx_pop),
+      .sm1_rx_dout (sm1_rx_dout),
+      .sm1_rx_empty(sm1_rx_empty),
+      .sm1_rx_full (sm1_rx_full),
+      .sm1_tx_empty(sm1_tx_empty),
+      .sm1_tx_full (sm1_tx_full),
+      .sm1_rx_pop  (host_sm1_rx_pop),
+      .sm_enable  (sm_enable),
+      .sm0_clkdiv   (sm0_clkdiv),
+      .sm0_execctrl (sm0_execctrl),
+      .sm0_shiftctrl(sm0_shiftctrl),
+      .sm0_pinctrl  (sm0_pinctrl),
+      .sm0_start_pc (sm0_start_pc),
+      .sm0_pins_init(sm0_pins_init),
+      .sm1_clkdiv   (sm1_clkdiv),
+      .sm1_execctrl (sm1_execctrl),
+      .sm1_shiftctrl(sm1_shiftctrl),
+      .sm1_pinctrl  (sm1_pinctrl),
+      .sm1_start_pc (sm1_start_pc),
+      .sm1_pins_init(sm1_pins_init)
   );
 
   instr_mem #(
@@ -120,40 +156,23 @@ module tt_um_example #(
       .clk(clk), .rst_n(rst_n),
       .push (sm0_rx_push),
       .din  (sm0_rx_din),
-      .pop  (1'b0),           // TODO: system side (not decided)
+      .pop  (host_sm0_rx_pop),
       .dout (sm0_rx_dout),
       .empty(sm0_rx_empty),
       .full (sm0_rx_full),
       .level(sm0_rx_level)
   );
 
-  // Configuration from uart_tx_program_init() in pico-examples, as RP2040 register
-  // words (field positions per datasheet 3.7). Constants for now.
-  // TODO: replace with host-written config registers (host interface not decided).
-  // TODO: the SDK also presets the TX pin to 1 and output before enabling, so the
-  //       line idles high (UART idle) - reflect that in the pin register reset values.
-  localparam [31:0] SM0_CLKDIV    = (32'd1 << 16);   // INT = 1. TODO: f_clk / (8 * baud) - not decided
-  localparam [31:0] SM0_EXECCTRL  = (32'd1 << 30)    // SIDE_EN: `.side_set 1 opt`
-                                  | (32'd3 << 12)    // WRAP_TOP    (from scripts/assemble.py)
-                                  | (32'd0 << 7);    // WRAP_BOTTOM
-  localparam [31:0] SM0_SHIFTCTRL = (32'd0 << 25)    // PULL_THRESH = 32 (encoded as 0)
-                                  | (32'd1 << 19)    // OUT_SHIFTDIR = right (LSB first)
-                                  | (32'd1 << 18);   // IN_SHIFTDIR  = right (unused here)
-                                                     // AUTOPULL = 0: program does an explicit PULL
-  localparam [31:0] SM0_PINCTRL   = (32'd2 << 29)    // SIDESET_COUNT = 2 (1 pin + enable bit)
-                                  | (32'd1 << 20)    // OUT_COUNT = 1
-                                  | (32'd0 << 10)    // SIDESET_BASE = 0 (TX pin)
-                                  | (32'd0 << 0);    // OUT_BASE     = 0 (same TX pin)
-
   pio_sm u_sm0 (
       .clk       (clk),
       .rst_n     (rst_n),
       .enable    (sm_enable[0]),        // TODO: host-controlled enable (not decided)
-      .clkdiv    (SM0_CLKDIV),
-      .execctrl  (SM0_EXECCTRL),
-      .shiftctrl (SM0_SHIFTCTRL),
-      .pinctrl   (SM0_PINCTRL),
-      .start_pc  (5'd0),        // program offset (from scripts/assemble.py)
+      .clkdiv    (sm0_clkdiv),
+      .execctrl  (sm0_execctrl),
+      .shiftctrl (sm0_shiftctrl),
+      .pinctrl   (sm0_pinctrl),
+      .start_pc  (sm0_start_pc),
+      .pins_init (sm0_pins_init),
       .instr_addr(sm0_instr_addr),
       .instr_data(sm0_instr_data),
       .tx_pop    (sm0_tx_pop),
@@ -170,8 +189,8 @@ module tt_um_example #(
   // ---------------- SM1: UART RX ----------------
   fifo #(.WIDTH(32), .DEPTH(4)) u_sm1_tx_fifo (  // unused by uart_rx_mini
       .clk(clk), .rst_n(rst_n),
-      .push (1'b0),           // TODO: system side (not decided)
-      .din  (32'd0),
+      .push (host_sm1_tx_push),
+      .din  (host_sm1_tx_din),
       .pop  (sm1_tx_pop),
       .dout (sm1_tx_dout),
       .empty(sm1_tx_empty),
@@ -183,34 +202,23 @@ module tt_um_example #(
       .clk(clk), .rst_n(rst_n),
       .push (sm1_rx_push),
       .din  (sm1_rx_din),
-      .pop  (1'b0),           // TODO: system side - received bytes (not decided)
+      .pop  (host_sm1_rx_pop),
       .dout (sm1_rx_dout),
       .empty(sm1_rx_empty),
       .full (sm1_rx_full),
       .level(sm1_rx_level)
   );
 
-  // Configuration from uart_rx_mini_program_init() in pico-examples.
-  // Note: shifting right with autopush at 8 leaves the byte in bits [31:24] of
-  // the pushed word (the SDK reads the FIFO's top byte).
-  localparam [31:0] SM1_CLKDIV    = (32'd1 << 16);   // INT = 1. TODO: f_clk / (8 * baud) - not decided
-  localparam [31:0] SM1_EXECCTRL  = (32'd7 << 12)    // WRAP_TOP    (from scripts/assemble.py)
-                                  | (32'd4 << 7);    // WRAP_BOTTOM
-  localparam [31:0] SM1_SHIFTCTRL = (32'd8 << 20)    // PUSH_THRESH = 8: push after each byte
-                                  | (32'd1 << 19)    // OUT_SHIFTDIR = right (unused here)
-                                  | (32'd1 << 18)    // IN_SHIFTDIR  = right (LSB first)
-                                  | (32'd1 << 16);   // AUTOPUSH
-  localparam [31:0] SM1_PINCTRL   = (32'd0 << 15);   // IN_BASE = 0: WAIT PIN 0 / IN PINS read the RX pin
-
   pio_sm u_sm1 (
       .clk       (clk),
       .rst_n     (rst_n),
       .enable    (sm_enable[1]),        // TODO: host-controlled enable (not decided)
-      .clkdiv    (SM1_CLKDIV),
-      .execctrl  (SM1_EXECCTRL),
-      .shiftctrl (SM1_SHIFTCTRL),
-      .pinctrl   (SM1_PINCTRL),
-      .start_pc  (5'd4),        // program offset (from scripts/assemble.py)
+      .clkdiv    (sm1_clkdiv),
+      .execctrl  (sm1_execctrl),
+      .shiftctrl (sm1_shiftctrl),
+      .pinctrl   (sm1_pinctrl),
+      .start_pc  (sm1_start_pc),
+      .pins_init (sm1_pins_init),
       .instr_addr(sm1_instr_addr),
       .instr_data(sm1_instr_data),
       .tx_pop    (sm1_tx_pop),
@@ -225,15 +233,13 @@ module tt_um_example #(
   );
 
   // ---- Outputs ----
-  assign uo_out  = {7'b0000000, sm0_pins_out[0]};  // uo_out[0] = UART TX
+  assign uo_out  = {host_miso, 6'b000000, sm0_pins_out[0]};  // uo_out[7] = host MISO, uo_out[0] = UART TX
   assign uio_out = 8'd0;
   assign uio_oe  = 8'd0;
 
   // List all unused inputs to prevent warnings
-  wire _unused = &{ena, ui_in[4:1], uio_in, host_rdata,
-                   mem_we, mem_waddr, mem_wdata, host_sm0_tx_push, host_sm0_tx_din, sm_enable,  // until step 3
-                   sm0_tx_full, sm0_tx_level, sm0_rx_empty, sm0_rx_dout, sm0_rx_level,
-                   sm1_tx_full, sm1_tx_level, sm1_rx_empty, sm1_rx_dout, sm1_rx_level,
+  wire _unused = &{ena, ui_in[4:1], uio_in,
+                   sm0_tx_level, sm0_rx_level, sm1_tx_level, sm1_rx_level,
                    sm0_pins_out[7:1], sm0_pins_oe, sm1_pins_out, sm1_pins_oe, 1'b0};
 
 endmodule
