@@ -157,12 +157,19 @@ module pio_sm (
   wire isr_empty = isr_shift_count >= ((push_thresh == 5'd0) ? 6'd32 : {1'b0, push_thresh});
   wire push_skip = is_push && instr_data[6] && !isr_empty;
 
+  // AUTOPULL handling
+  wire ap_needed = autopull&&(instr_data[15:13]==3'b011)&&osr_empty;
+  wire ap_refill = ap_needed&&!tx_empty;
+  wire [31:0] osr_now = ap_refill ? tx_dout : osr; // decides what to send to osr
+  wire [5:0] cnt_now = ap_refill ? 6'd0 : osr_shift_count; // resets shift count if ap is to be refilled
+
+
   // Stall handling
   wire stall = (is_pull && instr_data[5] && tx_empty && !pull_skip)
     || (is_push && instr_data[5] && rx_full && !push_skip)
     || ((instr_data[15:13] == 3'b001) && to_wait)
-    || (to_auto && (instr_data[15:13] == 3'b010) && rx_full);
-
+    || (to_auto && (instr_data[15:13] == 3'b010) && rx_full)
+    || (ap_needed && tx_empty);
   // JMP taken assignment
   
   reg jmp_taken;
@@ -193,9 +200,9 @@ module pio_sm (
 
   // bit count 0 means 32
   wire [31:0] osr_data =
-      (instr_data[4:0] == 5'd0) ? osr :
-      out_shift_right ? (osr & ~(32'hFFFFFFFF << instr_data[4:0]))
-                      : (osr >> (6'd32 - {1'b0, instr_data[4:0]}));
+      (instr_data[4:0] == 5'd0) ? osr_now :
+      out_shift_right ? (osr_now & ~(32'hFFFFFFFF << instr_data[4:0]))
+                      : (osr_now >> (6'd32 - {1'b0, instr_data[4:0]}));
 
   // IN instruction handling
 
@@ -333,11 +340,11 @@ module pio_sm (
             // OUT INSTRUCTION DECODING
             if (instr_data[15:13] == 3'b011) begin
               osr_shift_count <= (instr_data[4:0] == 5'd0) ||
-                                 (osr_shift_count + {1'b0, instr_data[4:0]} > 6'd32) ? 6'd32 :
-                                 osr_shift_count + {1'b0, instr_data[4:0]};
+                                 (cnt_now + {1'b0, instr_data[4:0]} > 6'd32) ? 6'd32 :
+                                 cnt_now + {1'b0, instr_data[4:0]};
               osr <= instr_data[4:0] == 5'd0 ? 32'd0 :
-                out_shift_right ? (osr >> instr_data[4:0])
-                : (osr << instr_data[4:0]);
+                out_shift_right ? (osr_now >> instr_data[4:0])
+                : (osr_now << instr_data[4:0]);
               case (instr_data[7:5])
                 3'b000:
                   for (p = 0; p < 8; p = p + 1)
@@ -387,7 +394,7 @@ module pio_sm (
   end
 
   assign instr_addr = pc;       // fetch address is the pc (combinational instruction memory read)
-  assign tx_pop     = is_pull && clkdiv_tick && (delay_cnt == 0) && !tx_empty && !pull_skip;
+  assign tx_pop     = clkdiv_tick && (delay_cnt == 0) && !tx_empty && ((is_pull&&!pull_skip)||ap_refill);
   assign pins_out   = pin_out_reg;
   assign pins_oe    = pin_oe_reg;
 
@@ -395,7 +402,7 @@ module pio_sm (
   wire _unused = &{rx_full,
                    isr, isr_shift_count,
                    clkdiv_frac,
-                   push_thresh, in_shift_right, autopull, autopush,
+                   push_thresh, in_shift_right, autopush,
                    // reserved / unsupported register bits
                    clkdiv[7:0], execctrl[31], execctrl[23:17], execctrl[6:0], shiftctrl[31:30],
                    shiftctrl[15:0], 1'b0};
