@@ -17,7 +17,7 @@ REPO = Path(__file__).resolve().parent.parent
 TIMEOUT_SECONDS = 300
 
 # Skips the slow every-byte tests. No parentheses or pipes: this goes through a shell.
-TEST_FILTER = "x[.]test_[^e]"
+TEST_FILTER = "[xs][.]test_[^e]"
 
 # name, file, original text, buggy text
 BUGS = [
@@ -42,6 +42,24 @@ BUGS = [
     ("TX line resets low", "host_regs.v", "sm0_pins_init <= 8'hFF;", "sm0_pins_init <= 8'h00;"),
     ("pin start value not applied", "pio_sm.v", "delay_cnt   <= 5'd0;\n      pin_out_reg <= pins_init;\n    end else if (clkdiv_tick)", "delay_cnt   <= 5'd0;\n    end else if (clkdiv_tick)"),
     ("FIFO accepts pushes when full", "fifo.v", "if (push && (!full || pop)) begin", "if (push) begin"),
+    ("IRQ: clear beats set", "irq_flags.v", "(flags & ~(clear_mask | host_clear)) | set_mask", "(flags | set_mask) & ~(clear_mask | host_clear)"),
+    ("IRQ: host clear ignored", "irq_flags.v", "~(clear_mask | host_clear)", "~clear_mask"),
+    ("IRQ: only SM0's writes count", "irq_flags.v", "i < NUM_SMS", "i < 1"),
+    ("IRQ: host clear stuck on", "host_regs.v", "(addr == 7'h22) && write_req ?", "(addr == 7'h22) ?"),
+    ("IRQ: host read dead", "host_regs.v", "7'h22: rdata = {24'd0, rdata_irq};", "7'h22: rdata = 32'd0;"),
+    ("IRQ: strobe ignores clkdiv", "pio_sm.v", "(we_irq_cd || we_irq_wait) && clkdiv_tick &&", "(we_irq_cd || we_irq_wait) &&"),
+    ("IRQ: strobe fires during delay", "pio_sm.v", "(we_irq_cd || we_irq_wait) && clkdiv_tick && (delay_cnt == 0)", "(we_irq_cd || we_irq_wait) && clkdiv_tick"),
+    ("IRQ: irq clear sets instead", "pio_sm.v", "wdata_irq = 1'b0;\n      end else if", "wdata_irq = 1'b1;\n      end else if"),
+    ("IRQ: clear obeys the wait bit", "pio_sm.v", "if (instr_data[6]) begin", "if (instr_data[6] && !instr_data[5]) begin"),
+    ("IRQ: irq wait rows swapped", "pio_sm.v", "case ({seen_irq, rdata_irq})", "case ({rdata_irq, seen_irq})"),
+    ("IRQ: irq wait never stalls", "pio_sm.v", "\n    || ((instr_data[15:13] == 3'b110) && wait_irq)", ""),
+    ("IRQ: irq wait re-sets while stalled", "pio_sm.v", "2'b11: begin\n            we_irq_cd = 1'b0;", "2'b11: begin\n            we_irq_cd = 1'b1;\n            wdata_irq = 1'b1;"),
+    ("IRQ: seen flag survives disable", "pio_sm.v", "      seen_irq    <= 1'b0;  // a mid-wait disable must not skip the set on re-enable\n", ""),
+    ("IRQ: wait 1 doesn't consume", "pio_sm.v", "we_irq_wait = 1'b1;", "we_irq_wait = 1'b0;"),
+    ("IRQ: wait polarity flipped", "pio_sm.v", "to_wait = rdata_irq != instr_data[7];", "to_wait = rdata_irq == instr_data[7];"),
+    ("IRQ: relative index ignored", "pio_sm.v", "instr_data[4] ? instr_data[1:0] + sm_num : instr_data[1:0]", "instr_data[1:0]"),
+    ("IRQ: relative carries into bit 2", "pio_sm.v", "assign addr_irq = {instr_data[2], addr_part};", "assign addr_irq = instr_data[2:0] + (instr_data[4] ? {1'b0, sm_num} : 3'd0);"),
+    ("IRQ: SM1 thinks it is SM0", "project.v", ".sm_num    (2'd1)", ".sm_num    (2'd0)"),
 ]
 
 
