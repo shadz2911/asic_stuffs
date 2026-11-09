@@ -44,7 +44,7 @@ module pio_sm (
 
     // Instruction fetch
     output wire [4:0]  instr_addr,   // = pc
-    input  wire [15:0] instr_data,
+    input  wire [15:0] instr_mem,
 
     // TX FIFO read side (system -> state machine)
     output wire        tx_pop,
@@ -116,8 +116,8 @@ module pio_sm (
   // value and an update rule in a clkdiv_tick-gated always block.
   // ------------------------------------------------------------------
   /* verilator lint_off UNDRIVEN */
-  reg [31:0] isr;              // TODO: input shift register (see 3.4.4 IN, 3.4.6 PUSH)
-  reg [5:0]  isr_shift_count;  // TODO: bits shifted into isr, 0..32 (autopush compares to push_thresh)
+  reg [31:0] isr;
+  reg [5:0]  isr_shift_count;
   /* verilator lint_on UNDRIVEN */
 
   // Clock divider: clkdiv_tick is a one-cycle ENABLE pulse every clkdiv_int clk cycles.
@@ -135,6 +135,13 @@ module pio_sm (
   // ------------------------------------------------------------------
   // EXECUTION RULE: pc, delay and wrap
   // ------------------------------------------------------------------
+
+  // OUT exec handling
+  reg [15:0] instr_cpy;
+  wire [15:0] instr_data;
+  reg out_exec;
+  assign instr_data = out_exec ? instr_cpy : instr_mem;
+
   // Delay = the low (5 - sideset_count) bits of [12:8]; side-set owns the top bits
   // (see 3.5.1). A shift by a runtime value is fine - it is just a small mux.
   wire [4:0] delay_field = instr_data[12:8] & (5'b11111 >> sideset_count);
@@ -310,8 +317,9 @@ module pio_sm (
 
   // Where pc goes when the current instruction completes. A taken JMP overrides
   // wrap, so a JMP placed at wrap_top still jumps (see 3.5.2).
-  wire [4:0] next_pc = jmp_taken          ? jmp_target  :
+  wire [4:0] next_pc = jmp_taken ? jmp_target  :
                        (instr_data[15:13] == 3'b011) && (instr_data[7:5] == 3'b101) ? osr_data[4:0] :
+                       out_exec ? pc :
                        (pc == wrap_top)   ? wrap_bottom :
                                             pc + 5'd1;
 
@@ -343,6 +351,7 @@ module pio_sm (
       isr <= 32'd0;
       isr_shift_count <= 6'd0;
       seen_irq <= 1'b0;
+      out_exec <= 1'b0;
     end else if (!enable) begin
       // start_pc is written after reset, so a disabled SM waits at it
       pc          <= start_pc;
@@ -350,6 +359,7 @@ module pio_sm (
       pin_out_reg <= pins_init;
       pin_oe_reg  <= pindirs_init;
       seen_irq    <= 1'b0;  // a mid-wait disable must not skip the set on re-enable
+      out_exec    <= 1'b0;
     end else if (clkdiv_tick) begin
       if (delay_cnt != 5'd0) begin
         // Still in the previous instruction's delay: just count down
@@ -360,6 +370,7 @@ module pio_sm (
             // A stalled instruction changes nothing and does not start its delay.
             pc        <= next_pc;
             delay_cnt <= delay_field;
+            out_exec  <= 1'b0;
 
             // SET INSTRUCTION DECODING
             if (instr_data[15:13] == 3'b111) begin
@@ -423,8 +434,11 @@ module pio_sm (
                   for (p = 0; p < 8; p = p + 1)
                     if (p >= out_base32 && p - out_base32 < out_count32)
                       pin_oe_reg[p] <= osr_data[p - out_base32];
-                3'b110: ; // TODO (not needed for UART)
-                3'b111: ; // TODO (not needed for UART)
+                3'b110: ; // TODO
+                3'b111: begin
+                  instr_cpy <= osr_data[15:0]; 
+                  out_exec <= 1'b1;
+                end
                 default: ;
               endcase
             end
