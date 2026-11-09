@@ -16,6 +16,10 @@ module host_regs (
     output wire [4:0] mem_waddr,
     output wire [15:0] mem_wdata,
 
+    // Interrrupt flags
+    input wire [7:0] rdata_irq,
+    output wire [7:0] clear_irq,
+
     // SM0 TX/RX FIFOs
     input wire [31:0] sm0_rx_dout,
     input wire sm0_rx_empty,
@@ -87,6 +91,7 @@ always @(*) begin
                 6'd0, sm1_tx_full,  sm0_tx_full,
                 6'd0, sm1_rx_empty, sm0_rx_empty,
                 6'd0, sm1_rx_full,  sm0_rx_full};
+        7'h22: rdata = {24'd0, rdata_irq};
         7'h31: rdata = sm0_rx_empty ? 32'd0 : sm0_rx_dout;
         7'h32: rdata = sm0_clkdiv;
         7'h33: rdata = sm0_execctrl;
@@ -104,6 +109,10 @@ always @(*) begin
         default: rdata = 32'd0;
     endcase
 end
+
+// Interrupt clear control
+
+assign clear_irq = (addr == 7'h22) && write_req ? wdata[7:0] : 8'd0;
 
 // SM enable control, assume 0x20 means we are writing to enable state machines
 

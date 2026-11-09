@@ -42,6 +42,14 @@ module tt_um_shadz2911_pio #(
   wire [7:0] pins_in = {7'b0000000, uart_rx_sync};  // pin 0 = UART RX; pins 7..1 not bonded out
   wire [7:0] sm0_pins_out, sm0_pins_oe, sm1_pins_out, sm1_pins_oe;
 
+  // ---- IRQ flags ----
+  wire [2:0] sm0_addr_irq, sm1_addr_irq;
+  wire       sm0_we_irq, sm1_we_irq;
+  wire       sm0_wdata_irq, sm1_wdata_irq;
+  wire       sm0_rdata_irq, sm1_rdata_irq;
+  wire [7:0] host_clear_irq;
+  wire [7:0] host_flags_irq;
+
   // ---- Host interface: host_spi -> host_regs ----
   wire        host_req, host_wr;
   wire [6:0]  host_addr;
@@ -93,6 +101,8 @@ module tt_um_shadz2911_pio #(
       .addr       (host_addr),
       .wdata      (host_data),
       .rdata      (host_rdata),
+      .clear_irq  (host_clear_irq),
+      .rdata_irq  (host_flags_irq),
       .mem_we     (mem_we),
       .mem_waddr  (mem_waddr),
       .mem_wdata  (mem_wdata),
@@ -167,6 +177,7 @@ module tt_um_shadz2911_pio #(
       .clk       (clk),
       .rst_n     (rst_n),
       .enable    (sm_enable[0]),        // TODO: host-controlled enable (not decided)
+      .sm_num    (2'd0),
       .clkdiv    (sm0_clkdiv),
       .execctrl  (sm0_execctrl),
       .shiftctrl (sm0_shiftctrl),
@@ -183,7 +194,11 @@ module tt_um_shadz2911_pio #(
       .rx_full   (sm0_rx_full),
       .pins_in   (pins_in),
       .pins_out  (sm0_pins_out),
-      .pins_oe   (sm0_pins_oe)
+      .pins_oe   (sm0_pins_oe),
+      .addr_irq  (sm0_addr_irq),
+      .we_irq    (sm0_we_irq),
+      .wdata_irq (sm0_wdata_irq),
+      .rdata_irq (sm0_rdata_irq)
   );
 
   // ---------------- SM1: UART RX ----------------
@@ -213,6 +228,7 @@ module tt_um_shadz2911_pio #(
       .clk       (clk),
       .rst_n     (rst_n),
       .enable    (sm_enable[1]),        // TODO: host-controlled enable (not decided)
+      .sm_num    (2'd1),
       .clkdiv    (sm1_clkdiv),
       .execctrl  (sm1_execctrl),
       .shiftctrl (sm1_shiftctrl),
@@ -229,7 +245,23 @@ module tt_um_shadz2911_pio #(
       .rx_full   (sm1_rx_full),
       .pins_in   (pins_in),
       .pins_out  (sm1_pins_out),
-      .pins_oe   (sm1_pins_oe)
+      .pins_oe   (sm1_pins_oe),
+      .addr_irq  (sm1_addr_irq),
+      .we_irq    (sm1_we_irq),
+      .wdata_irq (sm1_wdata_irq),
+      .rdata_irq (sm1_rdata_irq)
+  );
+
+  // ---------------- IRQ flags, shared by both SMs ----------------
+  irq_flags #(.NUM_SMS(2)) u_irq_flags (
+      .clk  (clk),
+      .rst_n(rst_n),
+      .addr ({sm1_addr_irq, sm0_addr_irq}),
+      .we   ({sm1_we_irq, sm0_we_irq}),
+      .wdata({sm1_wdata_irq, sm0_wdata_irq}),
+      .host_clear(host_clear_irq),
+      .flags_out (host_flags_irq),
+      .rdata({sm1_rdata_irq, sm0_rdata_irq})
   );
 
   // ---- Outputs ----

@@ -33,6 +33,7 @@ module pio_sm (
     input  wire [31:0] execctrl,     // SMx_EXECCTRL
     input  wire [31:0] shiftctrl,    // SMx_SHIFTCTRL
     input  wire [31:0] pinctrl,      // SMx_PINCTRL
+    input  wire [1:0]  sm_num,
     // Not an RP2040 register: there the SDK forces a JMP to the program's offset
     // through SMx_INSTR. Here pc simply resets to this value.
     input  wire [4:0]  start_pc,
@@ -57,7 +58,13 @@ module pio_sm (
     // Pins
     input  wire [7:0]  pins_in,
     output wire [7:0]  pins_out,
-    output wire [7:0]  pins_oe
+    output wire [7:0]  pins_oe,
+
+    // Shared IRQ flags (irq_flags.v)
+    output wire [2:0]  addr_irq,
+    output wire        we_irq,
+    output reg         wdata_irq,
+    input  wire        rdata_irq
 );
 
   // ------------------------------------------------------------------
@@ -131,21 +138,75 @@ module pio_sm (
   // (see 3.5.1). A shift by a runtime value is fine - it is just a small mux.
   wire [4:0] delay_field = instr_data[12:8] & (5'b11111 >> sideset_count);
 
+  // IRQ instruction work
+
+  wire [1:0] addr_part = instr_data[4] ? instr_data[1:0] + sm_num : instr_data[1:0];
+  assign addr_irq = {instr_data[2], addr_part};
+  reg seen_irq, next_seen_irq, wait_irq, we_irq_cd;
+  
+  always @(*) begin
+    we_irq_cd = 1'b0;
+    wdata_irq = 1'b0;
+    next_seen_irq = seen_irq;
+    wait_irq = 1'b0;
+    if (instr_data[15:13] == 3'b110) begin
+      if (instr_data[6]) begin
+        we_irq_cd = 1'b1;
+        wdata_irq = 1'b0;
+      end else if (!instr_data[6] && !instr_data[5]) begin
+        we_irq_cd = 1'b1;
+        wdata_irq = 1'b1;
+      end else begin
+        case ({seen_irq, rdata_irq})
+          2'b00: begin
+            we_irq_cd = 1'b1;
+            wdata_irq = 1'b1;
+            next_seen_irq = 1'b1;
+            wait_irq = 1'b1;
+          end
+          2'b01: begin
+            we_irq_cd = 1'b1;
+            wdata_irq = 1'b1;
+            next_seen_irq = 1'b1;
+            wait_irq = 1'b1;
+          end
+          2'b11: begin
+            we_irq_cd = 1'b0;
+            next_seen_irq = 1'b1;
+            wait_irq = 1'b1;
+          end
+          2'b10: begin
+            we_irq_cd = 1'b0;
+            next_seen_irq = 1'b0;
+            wait_irq = 1'b0;
+          end
+        endcase
+      end
+    end
+  end
+
   // WAIT instruction handling
 
   reg to_wait;
   reg [4:0] wait_sum;  // 5 bits: wraps at 32 like the RP2040
+  reg we_irq_wait;
   always @(*) begin
+    we_irq_wait = 1'b0;
     to_wait = 1'b0;
     wait_sum = in_base + instr_data[4:0];
     case (instr_data[6:5])
       // pins 8+ don't exist and read as 0
       2'b00: to_wait = ((instr_data[4:3] != 2'b00) ? 1'b0 : pins_in[instr_data[2:0]]) != instr_data[7];
       2'b01: to_wait = ((wait_sum[4:3] != 2'b00)   ? 1'b0 : pins_in[wait_sum[2:0]])   != instr_data[7];
-      2'b10: ; // TODO when IRQ implemented, will currently just complete
+      2'b10: to_wait = rdata_irq != instr_data[7];
       default: ;
     endcase
+    if ((instr_data[15:13] == 3'b001) && (instr_data[6:5] == 2'b10) && instr_data[7] && !to_wait) begin
+      we_irq_wait = 1'b1;
+    end
   end
+
+  assign we_irq = (we_irq_cd || we_irq_wait) && clkdiv_tick && (delay_cnt == 0);
 
   // PULL instruction work
   wire is_pull = (instr_data[15:13] == 3'b100) && instr_data[7];
@@ -169,7 +230,9 @@ module pio_sm (
     || (is_push && instr_data[5] && rx_full && !push_skip)
     || ((instr_data[15:13] == 3'b001) && to_wait)
     || (to_auto && (instr_data[15:13] == 3'b010) && rx_full)
-    || (ap_needed && tx_empty);
+    || (ap_needed && tx_empty)
+    || ((instr_data[15:13] == 3'b110) && wait_irq);
+
   // JMP taken assignment
   
   reg jmp_taken;
@@ -278,11 +341,13 @@ module pio_sm (
       osr_shift_count <= 6'd32;
       isr <= 32'd0;
       isr_shift_count <= 6'd0;
+      seen_irq <= 1'b0;
     end else if (!enable) begin
       // start_pc is written after reset, so a disabled SM waits at it
       pc          <= start_pc;
       delay_cnt   <= 5'd0;
       pin_out_reg <= pins_init;
+      seen_irq    <= 1'b0;  // a mid-wait disable must not skip the set on re-enable
     end else if (clkdiv_tick) begin
       if (delay_cnt != 5'd0) begin
         // Still in the previous instruction's delay: just count down
@@ -389,6 +454,7 @@ module pio_sm (
                 end
             end
         end
+        seen_irq <= next_seen_irq;
       end
     end
   end
