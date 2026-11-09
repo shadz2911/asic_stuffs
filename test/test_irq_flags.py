@@ -2,8 +2,8 @@
 """IRQ flags: the IRQ and WAIT IRQ instructions and the host flag register.
 
 Each test loads its own small program over SPI and judges the result at the pins.
-SM0 reports progress on uo_out[0]. SM1's pins aren't bonded out, so it reports by
-pushing to its RX FIFO or by setting a flag that SM0 is waiting on.
+SM0 reports progress on uio[0]. SM1 reports by pushing to its RX FIFO or by setting
+a flag that SM0 is waiting on.
 """
 
 import cocotb
@@ -20,6 +20,7 @@ REG_EXECCTRL = 3
 REG_PINCTRL = 5
 REG_START_PC = 6
 REG_PINS_INIT = 8
+REG_PINDIRS_INIT = 9
 
 SM0 = 0x1
 SM1 = 0x2
@@ -80,12 +81,13 @@ async def start(dut, sm0, sm1=(), clkdiv0=1, clkdiv1=1, sm0_execctrl=EXECCTRL_NO
         await host.write(regs + REG_PINCTRL, PINCTRL_SET_PIN_0)
         await host.write(regs + REG_START_PC, start_pc)
         await host.write(regs + REG_PINS_INIT, 0)
+    await host.write(SM0_REGS + REG_PINDIRS_INIT, 0x01)
     await ClockCycles(dut.clk, 5)
     return host
 
 
 def pin(dut):
-    return dut.uo_out.value.to_unsigned() & 1
+    return dut.uio_out.value.to_unsigned() & 1
 
 
 async def pin_becomes(dut, level, cycles=SETTLE):

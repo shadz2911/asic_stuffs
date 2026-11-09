@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""End-to-end UART TX: SPI on the host pins in, UART frames on uo_out[0] out.
+"""End-to-end UART TX: SPI on the host pins in, UART frames on uio[0] out.
 
 Everything is driven and judged at the chip's pins, so these tests never look
-inside the design. Pins: ui_in[7] SCK, ui_in[6] CS_n, ui_in[5] MOSI, uo_out[0] TX.
+inside the design. Pins: ui_in[7] SCK, ui_in[6] CS_n, ui_in[5] MOSI, uio[0] TX.
 """
 
 import random
@@ -21,7 +21,11 @@ ADDR_SM0_SHIFTCTRL = 0x34
 ADDR_SM0_PINCTRL = 0x35
 ADDR_SM0_START_PC = 0x36
 ADDR_SM0_PINS_INIT = 0x38
+ADDR_SM0_PINDIRS_INIT = 0x39
 CTRL_SM0_ENABLE = 0x1
+
+UART_TX_PIN = 0  # uio[0]
+UART_RX_PIN = 1  # uio[1]
 
 # uart_tx config: side_set 1 opt, wrap 0-3, shift right, side-set and OUT on pin 0
 UART_TX_EXECCTRL = 0x40003000
@@ -34,22 +38,26 @@ FRAME_BITS = 10  # start + 8 data + stop
 PROGRAM_HEX = Path(__file__).parent / "build" / "uart.hex"
 
 
+def tx_line(dut):
+    """The level on the wire: a pin the chip isn't driving is held high by the board's pull-up."""
+    if not (dut.uio_oe.value.to_unsigned() >> UART_TX_PIN) & 1:
+        return 1
+    return (dut.uio_out.value.to_unsigned() >> UART_TX_PIN) & 1
+
+
 class HostSpi:
     """Models the MCU: SPI mode 0, MSB first, one 40-bit frame per write."""
 
     def __init__(self, dut, half_period=5):
         self.dut = dut
         self.half_period = half_period  # clk cycles per SCK phase; 2 is the clk/4 limit
-        self.rx_line = 1  # ui_in[0], the UART RX line, idles high
         self._drive(sck=0, cs_n=1, mosi=0)
 
     def _drive(self, sck, cs_n, mosi):
-        self._pins = (sck, cs_n, mosi)
-        self.dut.ui_in.value = (sck << 7) | (cs_n << 6) | (mosi << 5) | self.rx_line
+        self.dut.ui_in.value = (sck << 7) | (cs_n << 6) | (mosi << 5)
 
     def set_rx_line(self, level):
-        self.rx_line = level
-        self._drive(*self._pins)
+        self.dut.uio_in.value = level << UART_RX_PIN
 
     async def _wait(self, cycles=None):
         await ClockCycles(self.dut.clk, self.half_period if cycles is None else cycles, rising=False)
@@ -109,7 +117,7 @@ class HostSpi:
 
 
 class UartMonitor:
-    """Independent UART receiver on uo_out[0], checking every clk of every bit."""
+    """Independent UART receiver on uio[0], checking every clk of every bit."""
 
     def __init__(self, dut, clkdiv=1):
         self.dut = dut
@@ -118,7 +126,7 @@ class UartMonitor:
         cocotb.start_soon(self._run())
 
     def _line(self):
-        return self.dut.uo_out.value.to_unsigned() & 1
+        return tx_line(self.dut)
 
     async def _sample(self):
         await FallingEdge(self.dut.clk)
@@ -168,7 +176,7 @@ async def reset_chip(dut, half_period=5, start_clock=True):
         cocotb.start_soon(Clock(dut.clk, 10, unit="us").start())
     host = HostSpi(dut, half_period)
     dut.ena.value = 1
-    dut.uio_in.value = 0
+    host.set_rx_line(1)  # the UART RX line idles high
     dut.rst_n.value = 0
     await ClockCycles(dut.clk, 10)
     dut.rst_n.value = 1
@@ -188,6 +196,7 @@ async def configure_uart_tx(host, clkdiv=1, execctrl=UART_TX_EXECCTRL, start_pc=
     await host.write(ADDR_SM0_SHIFTCTRL, UART_TX_SHIFTCTRL)
     await host.write(ADDR_SM0_PINCTRL, UART_TX_PINCTRL)
     await host.write(ADDR_SM0_START_PC, start_pc)
+    await host.write(ADDR_SM0_PINDIRS_INIT, 1 << UART_TX_PIN)
 
 
 async def start_uart_tx(dut, half_period=5, clkdiv=1):
@@ -208,7 +217,7 @@ async def test_line_never_drops_from_reset_to_enable(dut):
     async def watch_line():
         while True:
             await FallingEdge(dut.clk)
-            assert dut.uo_out.value.to_unsigned() & 1 == 1, "TX line dropped before any byte was sent"
+            assert tx_line(dut) == 1, "TX line dropped before any byte was sent"
 
     watcher = cocotb.start_soon(watch_line())
     await load_program(host)
@@ -221,13 +230,14 @@ async def test_line_never_drops_from_reset_to_enable(dut):
 @cocotb.test()
 async def test_host_sets_pin_level_while_disabled(dut):
     host = await reset_chip(dut)
+    await host.write(ADDR_SM0_PINDIRS_INIT, 1 << UART_TX_PIN)
     await host.write(ADDR_SM0_PINS_INIT, 0x00)
     await ClockCycles(dut.clk, 5)
-    assert dut.uo_out.value.to_unsigned() & 1 == 0, "line ignored a start value of 0"
+    assert tx_line(dut) == 0, "line ignored a start value of 0"
 
     await host.write(ADDR_SM0_PINS_INIT, 0x01)
     await ClockCycles(dut.clk, 5)
-    assert dut.uo_out.value.to_unsigned() & 1 == 1, "line ignored a start value of 1"
+    assert tx_line(dut) == 1, "line ignored a start value of 1"
 
 
 @cocotb.test()
@@ -235,7 +245,7 @@ async def test_line_idles_high_when_enabled(dut):
     host, monitor = await start_uart_tx(dut)
     for _ in range(FRAME_BITS * TICKS_PER_BIT * 3):
         await FallingEdge(dut.clk)
-        assert dut.uo_out.value.to_unsigned() & 1 == 1, "line left idle with nothing to send"
+        assert tx_line(dut) == 1, "line left idle with nothing to send"
     assert monitor.received == []
 
 

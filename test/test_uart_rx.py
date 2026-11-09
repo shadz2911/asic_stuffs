@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""End-to-end UART RX: UART frames on ui_in[0] in, words read over SPI out.
+"""End-to-end UART RX: UART frames on uio[1] in, words read over SPI out.
 
 As with the TX tests, everything is driven and judged at the chip's pins.
 """
@@ -12,9 +12,11 @@ from cocotb.triggers import ClockCycles, FallingEdge
 from test_uart_tx import (
     ADDR_CTRL,
     TICKS_PER_BIT,
+    UART_RX_PIN,
     configure_uart_tx,
     load_program,
     reset_chip,
+    tx_line,
 )
 
 ADDR_FSTAT = 0x21
@@ -27,10 +29,10 @@ ADDR_SM1_START_PC = 0x46
 CTRL_SM0_ENABLE = 0x1
 CTRL_SM1_ENABLE = 0x2
 
-# uart_rx_mini config: wrap 4-7, shift right, autopush at 8, IN and WAIT on pin 0
+# uart_rx_mini config: wrap 4-7, shift right, autopush at 8, IN and WAIT on the RX pin
 UART_RX_EXECCTRL = 0x00007200
 UART_RX_SHIFTCTRL = 0x008D0000
-UART_RX_PINCTRL = 0x00000000
+UART_RX_PINCTRL = UART_RX_PIN << 15  # in_base
 UART_RX_START_PC = 4
 
 FSTAT_ALL_EMPTY = 0x03000300
@@ -223,7 +225,7 @@ async def loopback(dut, host):
     """Connects the chip's TX pin to its own RX pin, as a wire on the board would."""
     while True:
         await FallingEdge(dut.clk)
-        host.set_rx_line(dut.uo_out.value.to_unsigned() & 1)
+        host.set_rx_line(tx_line(dut))
 
 
 @cocotb.test()

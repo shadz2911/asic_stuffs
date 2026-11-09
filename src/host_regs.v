@@ -29,6 +29,7 @@ module host_regs (
     output wire sm0_tx_push,
     output wire [31:0] sm0_tx_din,
     output wire sm0_rx_pop,
+    output reg [7:0] sm0_pindirs_init,
 
     // SM1 TX/RX FIFO
     input wire [31:0] sm1_rx_dout,
@@ -39,6 +40,7 @@ module host_regs (
     output wire sm1_tx_push,
     output wire [31:0] sm1_tx_din,
     output wire sm1_rx_pop,
+    output reg [7:0] sm1_pindirs_init,
 
     // State machine enables
     output reg [1:0] sm_enable,
@@ -99,6 +101,7 @@ always @(*) begin
         7'h35: rdata = sm0_pinctrl;
         7'h36: rdata = {27'd0, sm0_start_pc};
         7'h38: rdata = {24'd0, sm0_pins_init};
+        7'h39: rdata = {24'd0, sm0_pindirs_init};
         7'h41: rdata = sm1_rx_empty ? 32'd0 : sm1_rx_dout;
         7'h42: rdata = sm1_clkdiv;
         7'h43: rdata = sm1_execctrl;
@@ -106,6 +109,7 @@ always @(*) begin
         7'h45: rdata = sm1_pinctrl;
         7'h46: rdata = {27'd0, sm1_start_pc};
         7'h48: rdata = {24'd0, sm1_pins_init};
+        7'h49: rdata = {24'd0, sm1_pindirs_init};
         default: rdata = 32'd0;
     endcase
 end
@@ -134,12 +138,14 @@ always @(posedge clk) begin
         sm0_pinctrl <= 32'h1400_0000;
         sm0_start_pc <= 5'd0;
         sm0_pins_init <= 8'hFF; // lines idle high until the host says otherwise
+        sm0_pindirs_init <= 8'd0;
         sm1_clkdiv <= 32'h0001_0000;
         sm1_execctrl <= 32'h0001_F000;
         sm1_shiftctrl <= 32'h000C_0000;
         sm1_pinctrl <= 32'h1400_0000;
         sm1_start_pc <= 5'd0;
         sm1_pins_init <= 8'hFF;
+        sm1_pindirs_init <= 8'd0;
     end else begin
         sm0_clkdiv <= write_req && (addr == 7'h32) ? wdata : sm0_clkdiv;
         sm0_execctrl <= write_req && (addr == 7'h33) ? wdata : sm0_execctrl;
@@ -147,12 +153,14 @@ always @(posedge clk) begin
         sm0_pinctrl <= write_req && (addr == 7'h35) ? wdata : sm0_pinctrl;
         sm0_start_pc <= write_req && (addr == 7'h36) ? wdata[4:0] : sm0_start_pc;
         sm0_pins_init <= write_req && (addr == 7'h38) ? wdata[7:0] : sm0_pins_init;
+        sm0_pindirs_init <= write_req && (addr == 7'h39) ? wdata[7:0] : sm0_pindirs_init;
         sm1_clkdiv <= write_req && (addr == 7'h42) ? wdata : sm1_clkdiv;
         sm1_execctrl <= write_req && (addr == 7'h43) ? wdata : sm1_execctrl;
         sm1_shiftctrl <= write_req && (addr == 7'h44) ? wdata : sm1_shiftctrl;
         sm1_pinctrl <= write_req && (addr == 7'h45) ? wdata : sm1_pinctrl;
         sm1_start_pc <= write_req && (addr == 7'h46) ? wdata[4:0] : sm1_start_pc;
         sm1_pins_init <= write_req && (addr == 7'h48) ? wdata[7:0] : sm1_pins_init;
+        sm1_pindirs_init <= write_req && (addr == 7'h49) ? wdata[7:0] : sm1_pindirs_init;
     end
 end
 

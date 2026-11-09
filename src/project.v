@@ -20,8 +20,8 @@ module tt_um_shadz2911_pio #(
 );
 
   // Two state machines sharing one instruction memory, like the RP2040:
-  //   SM0 = UART TX (programs/uart_tx.pio,      words 0..3) -> uo_out[0]
-  //   SM1 = UART RX (programs/uart_rx_mini.pio, words 4..7) <- ui_in[0]
+  //   SM0 = UART TX (programs/uart_tx.pio,      words 0..3) -> uio[0]
+  //   SM1 = UART RX (programs/uart_rx_mini.pio, words 4..7) <- uio[1]
   // Each SM has its own TX and RX FIFO. No host interface yet, so the system
   // side of every FIFO is tied off.
 
@@ -38,8 +38,7 @@ module tt_um_shadz2911_pio #(
   wire [2:0]  sm1_tx_level, sm1_rx_level;
 
   // ---- Pins ----
-  wire       uart_rx_sync;   // ui_in[0] after the synchroniser
-  wire [7:0] pins_in = {7'b0000000, uart_rx_sync};  // pin 0 = UART RX; pins 7..1 not bonded out
+  wire [7:0] pins_in;  // uio_in after the synchroniser; PIO pin N = uio[N]
   wire [7:0] sm0_pins_out, sm0_pins_oe, sm1_pins_out, sm1_pins_oe;
 
   // ---- IRQ flags ----
@@ -70,13 +69,13 @@ module tt_um_shadz2911_pio #(
   wire [31:0] sm1_clkdiv, sm1_execctrl, sm1_shiftctrl, sm1_pinctrl;
   wire [4:0]  sm0_start_pc, sm1_start_pc;
   wire [7:0]  sm0_pins_init, sm1_pins_init;
+  wire [7:0]  sm0_pindirs_init, sm1_pindirs_init;
 
-  // UART RX is asynchronous to clk: synchronise before any logic sees it
-  sync2 #(.WIDTH(1)) u_sync_rx (
-      .clk  (clk),
-      .rst_n(rst_n),
-      .d    (ui_in[0]),
-      .q    (uart_rx_sync)
+  sync2 #(.WIDTH(8)) sync_pin_ins (
+    .clk(clk),
+    .rst_n(rst_n),
+    .d(uio_in),
+    .q(pins_in)
   );
 
   host_spi u_host_spi (
@@ -129,12 +128,14 @@ module tt_um_shadz2911_pio #(
       .sm0_pinctrl  (sm0_pinctrl),
       .sm0_start_pc (sm0_start_pc),
       .sm0_pins_init(sm0_pins_init),
+      .sm0_pindirs_init(sm0_pindirs_init),
       .sm1_clkdiv   (sm1_clkdiv),
       .sm1_execctrl (sm1_execctrl),
       .sm1_shiftctrl(sm1_shiftctrl),
       .sm1_pinctrl  (sm1_pinctrl),
       .sm1_start_pc (sm1_start_pc),
-      .sm1_pins_init(sm1_pins_init)
+      .sm1_pins_init(sm1_pins_init),
+      .sm1_pindirs_init(sm1_pindirs_init)
   );
 
   instr_mem #(
@@ -184,6 +185,7 @@ module tt_um_shadz2911_pio #(
       .pinctrl   (sm0_pinctrl),
       .start_pc  (sm0_start_pc),
       .pins_init (sm0_pins_init),
+      .pindirs_init(sm0_pindirs_init),
       .instr_addr(sm0_instr_addr),
       .instr_data(sm0_instr_data),
       .tx_pop    (sm0_tx_pop),
@@ -235,6 +237,7 @@ module tt_um_shadz2911_pio #(
       .pinctrl   (sm1_pinctrl),
       .start_pc  (sm1_start_pc),
       .pins_init (sm1_pins_init),
+      .pindirs_init(sm1_pindirs_init),
       .instr_addr(sm1_instr_addr),
       .instr_data(sm1_instr_data),
       .tx_pop    (sm1_tx_pop),
@@ -264,14 +267,18 @@ module tt_um_shadz2911_pio #(
       .rdata({sm1_rdata_irq, sm0_rdata_irq})
   );
 
+  pin_mux uio_mux (
+    .sm_pins_out({sm1_pins_out, sm0_pins_out}),
+    .sm_pins_oe({sm1_pins_oe, sm0_pins_oe}),
+    .pins_out(uio_out),
+    .pins_oe(uio_oe)
+  );
+
   // ---- Outputs ----
-  assign uo_out  = {host_miso, 6'b000000, sm0_pins_out[0]};  // uo_out[7] = host MISO, uo_out[0] = UART TX
-  assign uio_out = 8'd0;
-  assign uio_oe  = 8'd0;
+  assign uo_out  = {host_miso, 7'b0000000};  // uo_out[7] = host MISO
 
   // List all unused inputs to prevent warnings
-  wire _unused = &{ena, ui_in[4:1], uio_in,
-                   sm0_tx_level, sm0_rx_level, sm1_tx_level, sm1_rx_level,
-                   sm0_pins_out[7:1], sm0_pins_oe, sm1_pins_out, sm1_pins_oe, 1'b0};
+  wire _unused = &{ena, ui_in[4:0],
+                   sm0_tx_level, sm0_rx_level, sm1_tx_level, sm1_rx_level, 1'b0};
 
 endmodule

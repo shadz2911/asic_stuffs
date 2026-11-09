@@ -40,6 +40,7 @@ module pio_sm (
     // Pin levels while disabled, so a line idles correctly before the SM runs.
     // The RP2040 SDK does this with pio_sm_set_pins() before enabling.
     input  wire [7:0]  pins_init,
+    input  wire [7:0]  pindirs_init,  // pin directions while disabled (1 = output)
 
     // Instruction fetch
     output wire [4:0]  instr_addr,   // = pc
@@ -347,6 +348,7 @@ module pio_sm (
       pc          <= start_pc;
       delay_cnt   <= 5'd0;
       pin_out_reg <= pins_init;
+      pin_oe_reg  <= pindirs_init;
       seen_irq    <= 1'b0;  // a mid-wait disable must not skip the set on re-enable
     end else if (clkdiv_tick) begin
       if (delay_cnt != 5'd0) begin

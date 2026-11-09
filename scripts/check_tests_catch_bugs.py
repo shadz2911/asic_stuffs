@@ -17,7 +17,7 @@ REPO = Path(__file__).resolve().parent.parent
 TIMEOUT_SECONDS = 300
 
 # Skips the slow every-byte tests. No parentheses or pipes: this goes through a shell.
-TEST_FILTER = "[xs][.]test_[^e]"
+TEST_FILTER = "[xsi][.]test_[^e]"
 
 # name, file, original text, buggy text
 BUGS = [
@@ -40,7 +40,7 @@ BUGS = [
     ("empty RXF read returns junk", "host_regs.v", "rdata = sm1_rx_empty ? 32'd0 : sm1_rx_dout;", "rdata = sm1_rx_dout;"),
     ("SM0 enable ignored", "project.v", ".enable    (sm_enable[0])", ".enable    (1'b1)"),
     ("TX line resets low", "host_regs.v", "sm0_pins_init <= 8'hFF;", "sm0_pins_init <= 8'h00;"),
-    ("pin start value not applied", "pio_sm.v", "delay_cnt   <= 5'd0;\n      pin_out_reg <= pins_init;\n    end else if (clkdiv_tick)", "delay_cnt   <= 5'd0;\n    end else if (clkdiv_tick)"),
+    ("pin start value not applied", "pio_sm.v", "delay_cnt   <= 5'd0;\n      pin_out_reg <= pins_init;\n      pin_oe_reg  <= pindirs_init;", "delay_cnt   <= 5'd0;\n      pin_oe_reg  <= pindirs_init;"),
     ("FIFO accepts pushes when full", "fifo.v", "if (push && (!full || pop)) begin", "if (push) begin"),
     ("IRQ: clear beats set", "irq_flags.v", "(flags & ~(clear_mask | host_clear)) | set_mask", "(flags | set_mask) & ~(clear_mask | host_clear)"),
     ("IRQ: host clear ignored", "irq_flags.v", "~(clear_mask | host_clear)", "~clear_mask"),
@@ -60,6 +60,17 @@ BUGS = [
     ("IRQ: relative index ignored", "pio_sm.v", "instr_data[4] ? instr_data[1:0] + sm_num : instr_data[1:0]", "instr_data[1:0]"),
     ("IRQ: relative carries into bit 2", "pio_sm.v", "assign addr_irq = {instr_data[2], addr_part};", "assign addr_irq = instr_data[2:0] + (instr_data[4] ? {1'b0, sm_num} : 3'd0);"),
     ("IRQ: SM1 thinks it is SM0", "project.v", ".sm_num    (2'd1)", ".sm_num    (2'd0)"),
+    ("pins: inputs read the wrong port", "project.v", ".d(uio_in),", ".d(ui_in),"),
+    ("pins: PINDIRS_INIT not applied", "pio_sm.v", "      pin_oe_reg  <= pindirs_init;\n", ""),
+    ("pins: PINDIRS_INIT never written", "host_regs.v", "(addr == 7'h39)", "(addr == 7'h3A)"),
+    ("pins: uio_oe never set", "pin_mux.v", "pins_oe[p] = 1'b1;", "pins_oe[p] = 1'b0;"),
+    ("pins: lower SM wins a shared pin", "pin_mux.v", "for (s = 0; s < NUM_SMS; s = s + 1) begin", "for (s = NUM_SMS - 1; s >= 0; s = s - 1) begin"),
+    ("pins: undriven pins pass their value", "pin_mux.v", "if (sm_pins_oe[8*s + p]) begin", "if (1'b1) begin"),
+    ("autopull never refills", "pio_sm.v", "wire ap_refill = ap_needed&&!tx_empty;", "wire ap_refill = 1'b0;"),
+    ("autopull doesn't pop the FIFO", "pio_sm.v", "((is_pull&&!pull_skip)||ap_refill)", "(is_pull&&!pull_skip)"),
+    ("autopull doesn't stall when empty", "pio_sm.v", "\n    || (ap_needed && tx_empty)", ""),
+    ("autopull keeps the old count", "pio_sm.v", "wire [5:0] cnt_now = ap_refill ? 6'd0 : osr_shift_count;", "wire [5:0] cnt_now = osr_shift_count;"),
+    ("autopull ignores the threshold", "pio_sm.v", "(instr_data[15:13]==3'b011)&&osr_empty;", "(instr_data[15:13]==3'b011)&&(osr_shift_count >= 6'd32);"),
 ]
 
 
