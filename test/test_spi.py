@@ -343,6 +343,30 @@ async def test_a_pin_nobody_drives_ignores_its_value(dut):
     assert uio_state(dut) == (0x00, 0x00)
 
 
+ADDR_OE_INVERT = 0x23
+
+
+@cocotb.test()
+async def test_oe_invert_flips_only_the_chosen_pins(dut):
+    host = await reset_chip(dut, HALF_PERIOD)
+    assert await host.read(ADDR_OE_INVERT) == 0, "inversion should be off after reset"
+
+    # The SDK's I2C order: directions to 1 first, then invert, so the pins stay released
+    await set_pins(host, SM0_REGS, 0x00, 0x03)
+    await host.write(ADDR_OE_INVERT, 0x03)
+    await ClockCycles(dut.clk, 5)
+    assert await host.read(ADDR_OE_INVERT) == 0x03
+    assert uio_state(dut)[1] == 0x00, "inverted pins with pindir 1 should be released"
+
+    await set_pins(host, SM0_REGS, 0x00, 0x01)  # pin 1 now has pindir 0, so it pulls low
+    await ClockCycles(dut.clk, 5)
+    assert uio_state(dut) == (0x00, 0x02), "pindir 0 on an inverted pin should drive it low"
+
+    await host.write(ADDR_OE_INVERT, 0x80)  # pins 0 and 1 back to normal; pin 7 alone inverted
+    await ClockCycles(dut.clk, 5)
+    assert uio_state(dut)[1] == 0x81
+
+
 @cocotb.test()
 async def test_directions_reload_when_disabled(dut):
     # The program turns pin 1 off, and disabling the SM must restore PINDIRS_INIT

@@ -45,6 +45,9 @@ module host_regs (
     // State machine enables
     output reg [1:0] sm_enable,
 
+    // Per-pin output-enable inversion, like the RP2040's GPIO OEOVER = INVERT
+    output reg [7:0] oe_invert,
+
     // SM0 config
     output reg [31:0] sm0_clkdiv,
     output reg [31:0] sm0_execctrl,
@@ -52,6 +55,8 @@ module host_regs (
     output reg [31:0] sm0_pinctrl,
     output reg [4:0] sm0_start_pc,
     output reg [7:0] sm0_pins_init,
+    output wire [15:0] sm0_instr,
+    output wire sm0_instr_exec,
 
     // SM1 config
     output reg [31:0] sm1_clkdiv,
@@ -59,7 +64,9 @@ module host_regs (
     output reg [31:0] sm1_shiftctrl,
     output reg [31:0] sm1_pinctrl,
     output reg [4:0] sm1_start_pc,
-    output reg [7:0] sm1_pins_init
+    output reg [7:0] sm1_pins_init,
+    output wire [15:0] sm1_instr,
+    output wire sm1_instr_exec
 );
 
 // Instruction memory and write control
@@ -84,6 +91,12 @@ assign sm0_rx_pop = read_req && (addr == 7'h31);
 
 assign sm1_rx_pop = read_req && (addr == 7'h41);
 
+assign sm0_instr_exec = write_req && (addr == 7'h3A);
+assign sm0_instr = wdata[15:0];
+
+assign sm1_instr_exec = write_req  && (addr == 7'h4A);
+assign sm1_instr = wdata[15:0];
+
 // rdata assignment
 
 always @(*) begin
@@ -94,6 +107,7 @@ always @(*) begin
                 6'd0, sm1_rx_empty, sm0_rx_empty,
                 6'd0, sm1_rx_full,  sm0_rx_full};
         7'h22: rdata = {24'd0, rdata_irq};
+        7'h23: rdata = {24'd0, oe_invert};
         7'h31: rdata = sm0_rx_empty ? 32'd0 : sm0_rx_dout;
         7'h32: rdata = sm0_clkdiv;
         7'h33: rdata = sm0_execctrl;
@@ -123,8 +137,10 @@ assign clear_irq = (addr == 7'h22) && write_req ? wdata[7:0] : 8'd0;
 always @(posedge clk) begin
     if (!rst_n) begin
         sm_enable <= 2'b00;
+        oe_invert <= 8'd0;  // no inversion, so every pin starts released
     end else begin
         sm_enable <= write_req && (addr == 7'h20) ? wdata[1:0] : sm_enable;
+        oe_invert <= write_req && (addr == 7'h23) ? wdata[7:0] : oe_invert;
     end
 end
 

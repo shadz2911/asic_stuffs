@@ -5,6 +5,7 @@
 *.fst.hier
 runs
 tt_submission
+scripts/__pycache__
 src/user_config.json
 src/config_merged.json
 test/sim_build

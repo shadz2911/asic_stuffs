@@ -40,6 +40,8 @@ module tt_um_shadz2911_pio #(
   // ---- Pins ----
   wire [7:0] pins_in;  // uio_in after the synchroniser; PIO pin N = uio[N]
   wire [7:0] sm0_pins_out, sm0_pins_oe, sm1_pins_out, sm1_pins_oe;
+  wire [7:0] pio_pins_oe;  // combined PIO enables, before the per-pin inversion
+  wire [7:0] oe_invert;
 
   // ---- IRQ flags ----
   wire [2:0] sm0_addr_irq, sm1_addr_irq;
@@ -70,6 +72,8 @@ module tt_um_shadz2911_pio #(
   wire [4:0]  sm0_start_pc, sm1_start_pc;
   wire [7:0]  sm0_pins_init, sm1_pins_init;
   wire [7:0]  sm0_pindirs_init, sm1_pindirs_init;
+  wire [15:0] sm0_instr_forced, sm1_instr_forced;
+  wire        sm0_instr_exec, sm1_instr_exec;
 
   sync2 #(.WIDTH(8)) sync_pin_ins (
     .clk(clk),
@@ -122,6 +126,7 @@ module tt_um_shadz2911_pio #(
       .sm1_tx_full (sm1_tx_full),
       .sm1_rx_pop  (host_sm1_rx_pop),
       .sm_enable  (sm_enable),
+      .oe_invert  (oe_invert),
       .sm0_clkdiv   (sm0_clkdiv),
       .sm0_execctrl (sm0_execctrl),
       .sm0_shiftctrl(sm0_shiftctrl),
@@ -129,13 +134,17 @@ module tt_um_shadz2911_pio #(
       .sm0_start_pc (sm0_start_pc),
       .sm0_pins_init(sm0_pins_init),
       .sm0_pindirs_init(sm0_pindirs_init),
+      .sm0_instr    (sm0_instr_forced),
+      .sm0_instr_exec(sm0_instr_exec),
       .sm1_clkdiv   (sm1_clkdiv),
       .sm1_execctrl (sm1_execctrl),
       .sm1_shiftctrl(sm1_shiftctrl),
       .sm1_pinctrl  (sm1_pinctrl),
       .sm1_start_pc (sm1_start_pc),
       .sm1_pins_init(sm1_pins_init),
-      .sm1_pindirs_init(sm1_pindirs_init)
+      .sm1_pindirs_init(sm1_pindirs_init),
+      .sm1_instr    (sm1_instr_forced),
+      .sm1_instr_exec(sm1_instr_exec)
   );
 
   instr_mem #(
@@ -188,6 +197,8 @@ module tt_um_shadz2911_pio #(
       .pindirs_init(sm0_pindirs_init),
       .instr_addr(sm0_instr_addr),
       .instr_mem (sm0_instr_data),
+      .instr_forced(sm0_instr_forced),
+      .instr_exec(sm0_instr_exec),
       .tx_pop    (sm0_tx_pop),
       .tx_dout   (sm0_tx_dout),
       .tx_empty  (sm0_tx_empty),
@@ -240,6 +251,8 @@ module tt_um_shadz2911_pio #(
       .pindirs_init(sm1_pindirs_init),
       .instr_addr(sm1_instr_addr),
       .instr_mem (sm1_instr_data),
+      .instr_forced(sm1_instr_forced),
+      .instr_exec(sm1_instr_exec),
       .tx_pop    (sm1_tx_pop),
       .tx_dout   (sm1_tx_dout),
       .tx_empty  (sm1_tx_empty),
@@ -271,8 +284,11 @@ module tt_um_shadz2911_pio #(
     .sm_pins_out({sm1_pins_out, sm0_pins_out}),
     .sm_pins_oe({sm1_pins_oe, sm0_pins_oe}),
     .pins_out(uio_out),
-    .pins_oe(uio_oe)
+    .pins_oe(pio_pins_oe)
   );
+
+  // Open-drain buses (I2C) invert OE per pin, so pindir 1 = released and 0 = pulled low
+  assign uio_oe = pio_pins_oe ^ oe_invert;
 
   // ---- Outputs ----
   assign uo_out  = {host_miso, 7'b0000000};  // uo_out[7] = host MISO

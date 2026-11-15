@@ -45,6 +45,9 @@ module pio_sm (
     // Instruction fetch
     output wire [4:0]  instr_addr,   // = pc
     input  wire [15:0] instr_mem,
+    // Forced instruction from the host (SMx_INSTR): instr_exec is a one-cycle strobe
+    input  wire [15:0] instr_forced,
+    input  wire        instr_exec,
 
     // TX FIFO read side (system -> state machine)
     output wire        tx_pop,
@@ -472,6 +475,12 @@ module pio_sm (
         end
         seen_irq <= next_seen_irq;
       end
+    end
+
+    if (enable && rst_n && instr_exec) begin
+      out_exec <= 1'b1;
+      instr_cpy <= instr_forced;
+      seen_irq <= 1'b0;
     end
   end
 

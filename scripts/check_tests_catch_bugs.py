@@ -66,6 +66,8 @@ BUGS = [
     ("pins: uio_oe never set", "pin_mux.v", "pins_oe[p] = 1'b1;", "pins_oe[p] = 1'b0;"),
     ("pins: lower SM wins a shared pin", "pin_mux.v", "for (s = 0; s < NUM_SMS; s = s + 1) begin", "for (s = NUM_SMS - 1; s >= 0; s = s - 1) begin"),
     ("pins: undriven pins pass their value", "pin_mux.v", "if (sm_pins_oe[8*s + p]) begin", "if (1'b1) begin"),
+    ("pins: OE_INVERT ignored", "project.v", "assign uio_oe = pio_pins_oe ^ oe_invert;", "assign uio_oe = pio_pins_oe;"),
+    ("pins: OE_INVERT never written", "host_regs.v", "(addr == 7'h23) ?", "(addr == 7'h24) ?"),
     ("autopull never refills", "pio_sm.v", "wire ap_refill = ap_needed&&!tx_empty;", "wire ap_refill = 1'b0;"),
     ("autopull doesn't pop the FIFO", "pio_sm.v", "((is_pull&&!pull_skip)||ap_refill)", "(is_pull&&!pull_skip)"),
     ("autopull doesn't stall when empty", "pio_sm.v", "\n    || (ap_needed && tx_empty)", ""),
