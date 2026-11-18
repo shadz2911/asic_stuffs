@@ -53,11 +53,13 @@ module pio_sm (
     output wire        tx_pop,
     input  wire [31:0] tx_dout,
     input  wire        tx_empty,
+    input  wire [2:0]  tx_fifo_level,
 
     // RX FIFO write side (state machine -> system)
     output wire        rx_push,
     output wire [31:0] rx_din,
     input  wire        rx_full,
+    input  wire [2:0]  rx_fifo_level,
 
     // Pins
     input  wire [7:0]  pins_in,
@@ -84,6 +86,13 @@ module pio_sm (
   wire [4:0]  jmp_pin         = execctrl[28:24];  // pin tested by JMP PIN (see 3.4.2 JMP)
   wire [4:0]  wrap_top        = execctrl[16:12];
   wire [4:0]  wrap_bottom     = execctrl[11:7];
+    // STATUS configuration (used by MOV STATUS)
+  wire        status_sel        = execctrl[4];    // 0: TX FIFO, 1: RX FIFO
+  wire [3:0]  status_n          = execctrl[3:0];  // FIFO level threshold
+  wire [2:0]  status_fifo_level = status_sel ? rx_fifo_level : tx_fifo_level;
+  wire        status_condition  = ({1'b0, status_fifo_level} < status_n);
+  wire [31:0] status_value      = status_condition ? 32'hFFFF_FFFF : 32'h0000_0000;
+
 
   // SMx_SHIFTCTRL (see 3.5.4 Autopush and Autopull, 3.4.4 IN, 3.4.5 OUT)
   wire [4:0]  pull_thresh     = shiftctrl[29:25]; // 0 means 32
@@ -278,6 +287,43 @@ module pio_sm (
       out_shift_right ? (osr_now & ~(32'hFFFFFFFF << instr_data[4:0]))
                       : (osr_now >> (6'd32 - {1'b0, instr_data[4:0]}));
 
+  // IN pins data handling (for MOV)
+
+  reg [31:0] pins_view;
+  reg [4:0]  view_pin;
+  integer    vb;
+  always @(*) begin
+    pins_view = 32'd0;
+    for (vb = 0; vb < 32; vb = vb + 1) begin
+      view_pin = in_base + vb[4:0];
+      pins_view[vb] = (view_pin[4:3] == 2'b00) ? pins_in[view_pin[2:0]] : 1'b0;
+    end
+  end
+
+  // MOV instruction handling
+
+  wire is_mov = (instr_data[15:13] == 3'b101);
+  reg [31:0] mov_src, mov_val;
+  integer mb;
+  always @(*) begin
+    case (instr_data[2:0])
+      3'b000: mov_src = pins_view;
+      3'b001: mov_src = x;
+      3'b010: mov_src = y;
+      3'b110: mov_src = isr;
+      3'b111: mov_src = osr;
+      3'b101: mov_src = status_value;
+      default: mov_src = 32'd0;   // NULL; reserved; STATUS not implemented yet
+    endcase
+    case (instr_data[4:3])
+      2'b01: mov_val = ~mov_src;
+      2'b10: begin
+        for (mb = 0; mb < 32; mb = mb + 1) mov_val[mb] = mov_src[31 - mb];
+      end
+      default: mov_val = mov_src;
+    endcase
+  end
+  
   // IN instruction handling
 
   reg [31:0] isr_data, in_src, in_data;
@@ -322,6 +368,7 @@ module pio_sm (
   // wrap, so a JMP placed at wrap_top still jumps (see 3.5.2).
   wire [4:0] next_pc = jmp_taken ? jmp_target  :
                        (instr_data[15:13] == 3'b011) && (instr_data[7:5] == 3'b101) ? osr_data[4:0] :
+                        is_mov && (instr_data[7:5] == 3'b101) ? mov_val[4:0] :
                        out_exec ? pc :
                        (pc == wrap_top)   ? wrap_bottom :
                                             pc + 5'd1;
@@ -455,7 +502,27 @@ module pio_sm (
                 isr_shift_count <= 0;
               end
             end
-        end
+
+            // MOV implementation
+            if (is_mov) begin
+              case (instr_data[7:5])
+                3'b000:
+                  for (p = 0; p < 8; p = p + 1)
+                    if (p >= out_base32 && p - out_base32 < out_count32)
+                      pin_out_reg[p] <= mov_val[p - out_base32];
+                3'b001: x <= mov_val;
+                3'b010: y <= mov_val;
+                3'b100: begin
+                  instr_cpy <= mov_val[15:0];
+                  out_exec  <= 1'b1;
+                end
+                // 3'b101 (PC) is handled in next_pc
+                3'b110: begin isr <= mov_val; isr_shift_count <= 6'd0; end
+                3'b111: begin osr <= mov_val; osr_shift_count <= 6'd0; end
+                default: ;
+              endcase
+            end  
+        end     
         // SIDESET assignment happens after SET assignment
         // Side-set: applied on issue, stalled or not. Copy the value bits straight
         // out of the instruction onto pins sideset_base, sideset_base+1, ...
